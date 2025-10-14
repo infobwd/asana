@@ -1,7 +1,7 @@
 /* KruBoard front-end (GitHub hosted) */
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
-  liffId: 'AsanaToSheet.gs'
+  liffId: '2006490627-3NpRPl0G'
 };
 
 const state = {

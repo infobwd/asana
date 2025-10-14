@@ -11,6 +11,13 @@ const state = {
   tasks: [],
   userStats: [],
   dashboard: null,
+  personalStats: null,
+  currentUser: null,
+  notifications: [],
+  filteredTasks: [],
+  taskFilters: { status:'all', search:'' },
+  taskPagination: { page:1, pageSize:10, totalPages:1 },
+  isAdmin: false,
   apiKey: localStorage.getItem('kruboard_api_key') || ''
 };
 
@@ -25,13 +32,22 @@ const els = {
     totalTasks: document.getElementById('headerTotalTasks'),
     upcomingTasks: document.getElementById('headerUpcomingTasks'),
     totalUsers: document.getElementById('headerTotalUsers'),
-    completionRate: document.getElementById('headerCompletionRate')
+    completionRate: document.getElementById('headerCompletionRate'),
+    myTasks: document.getElementById('headerMyTasks'),
+    myUpcoming: document.getElementById('headerMyUpcoming')
   },
   stats: {
     completed: document.getElementById('completedCount'),
     pending: document.getElementById('pendingCount'),
     month: document.getElementById('monthTaskCount'),
     completionRate: document.getElementById('completionRate')
+  },
+  statsPersonal: {
+    container: document.getElementById('personalStatsSection'),
+    completed: document.getElementById('myCompletedCount'),
+    pending: document.getElementById('myPendingCount'),
+    month: document.getElementById('myMonthTaskCount'),
+    upcoming: document.getElementById('myUpcomingCount')
   },
   notificationCount: document.getElementById('notificationCount'),
   taskCardsContainer: document.getElementById('taskCardsContainer'),
@@ -42,7 +58,14 @@ const els = {
   fabBtn: document.getElementById('fabBtn'),
   timeFilters: Array.from(document.querySelectorAll('.time-filter')),
   nav: Array.from(document.querySelectorAll('.nav-item')),
-  notificationBtn: document.getElementById('notificationBtn')
+  notificationBtn: document.getElementById('notificationBtn'),
+  taskSearchInput: document.getElementById('taskSearchInput'),
+  taskStatusFilter: document.getElementById('taskStatusFilter'),
+  taskPaginationPrev: document.getElementById('taskPaginationPrev'),
+  taskPaginationNext: document.getElementById('taskPaginationNext'),
+  taskPaginationInfo: document.getElementById('taskPaginationInfo'),
+  taskPaginationWrapper: document.getElementById('taskPagination'),
+  addTaskBtn: document.getElementById('addTaskBtn')
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -127,9 +150,7 @@ function bindUI(){
   }
 
   if (els.notificationBtn){
-    els.notificationBtn.addEventListener('click', ()=>{
-      toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
-    });
+    els.notificationBtn.addEventListener('click', showNotifications);
   }
 
   if (els.allTasksContainer){
@@ -139,6 +160,46 @@ function bindUI(){
       const taskId = button.dataset.taskId;
       handleUpdateStatus(taskId);
     });
+  }
+
+  if (els.taskSearchInput){
+    els.taskSearchInput.addEventListener('input', ()=>{
+      state.taskFilters.search = els.taskSearchInput.value.trim();
+      state.taskPagination.page = 1;
+      applyTaskFilters();
+    });
+  }
+
+  if (els.taskStatusFilter){
+    els.taskStatusFilter.addEventListener('change', ()=>{
+      state.taskFilters.status = els.taskStatusFilter.value;
+      state.taskPagination.page = 1;
+      applyTaskFilters();
+    });
+  }
+
+  if (els.taskPaginationPrev){
+    els.taskPaginationPrev.addEventListener('click', ()=>{
+      if (state.taskPagination.page > 1){
+        state.taskPagination.page -= 1;
+        renderTaskList();
+        renderTaskPagination();
+      }
+    });
+  }
+
+  if (els.taskPaginationNext){
+    els.taskPaginationNext.addEventListener('click', ()=>{
+      if (state.taskPagination.page < state.taskPagination.totalPages){
+        state.taskPagination.page += 1;
+        renderTaskList();
+        renderTaskPagination();
+      }
+    });
+  }
+
+  if (els.addTaskBtn){
+    els.addTaskBtn.addEventListener('click', promptCreateTask);
   }
 }
 
@@ -275,13 +336,19 @@ function handleDataError(err, fallbackMessage){
 }
 
 async function loadPublicData(){
-  const [dashboard] = await Promise.all([fetchDashboardStats(), loadUpcomingTasks()]);
-  state.dashboard = dashboard;
+  const dashboardPromise = fetchDashboardStats();
+  const upcomingPromise = loadUpcomingTasks();
+  const dashboard = await dashboardPromise;
   renderDashboard(dashboard);
+  await upcomingPromise;
 }
 
 function fetchDashboardStats(){
-  return jsonpRequest({ action:'dashboard' })
+  const payload = { action:'dashboard' };
+  if (state.isLoggedIn && state.profile?.idToken){
+    payload.idToken = state.profile.idToken;
+  }
+  return jsonpRequest(payload)
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'dashboard error');
@@ -291,12 +358,25 @@ function fetchDashboardStats(){
 }
 
 function loadUpcomingTasks(){
-  return jsonpRequest({ action:'upcoming', days: state.upcomingDays })
+  const payload = {
+    action:'upcoming',
+    days: state.upcomingDays
+  };
+  if (state.isLoggedIn){
+    payload.scope = 'mine';
+    if (state.profile?.idToken){
+      payload.idToken = state.profile.idToken;
+    }
+  }
+  return jsonpRequest(payload)
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'upcoming error');
       }
       const data = Array.isArray(res.data) ? res.data : [];
+      const personal = state.isLoggedIn;
+      state.notifications = personal ? data : [];
+      setText(els.notificationCount, personal ? (data.length || 0) : 0);
       renderUpcomingTasks(data);
       return data;
     })
@@ -311,11 +391,16 @@ function loadSecureData(){
   return Promise.all([
     fetchAllTasks(),
     fetchUserStats()
-  ]).then(([tasks, stats])=>{
-    state.tasks = tasks;
+  ]).then(([tasksResult, stats])=>{
+    state.tasks = tasksResult.tasks || [];
+    if (tasksResult.currentUser){
+      state.currentUser = tasksResult.currentUser;
+      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
+    }
     state.userStats = stats;
-    renderTasks(tasks);
+    renderTasks(state.tasks);
     renderUserStats(stats);
+    updateAdminUI();
   }).catch(err=>{
     handleDataError(err, 'ไม่สามารถโหลดข้อมูลแบบละเอียดได้');
   });
@@ -324,13 +409,17 @@ function loadSecureData(){
 function fetchAllTasks(){
   return jsonpRequest({
     action:'tasks',
+    scope:'mine',
     idToken: state.profile?.idToken || ''
   })
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'tasks error');
       }
-      return Array.isArray(res.data) ? res.data : [];
+      return {
+        tasks: Array.isArray(res.data) ? res.data : [],
+        currentUser: res.currentUser || null
+      };
     });
 }
 
@@ -348,6 +437,7 @@ function fetchUserStats(){
 }
 
 function renderDashboard(data){
+  state.dashboard = data || null;
   const summary = data?.summary || {};
   setText(els.headerTotals.totalTasks, summary.totalTasks || 0);
   setText(els.headerTotals.upcomingTasks, summary.upcomingTasks || 0);
@@ -358,10 +448,45 @@ function renderDashboard(data){
   setText(els.stats.pending, summary.pendingTasks || 0);
   setText(els.stats.month, summary.currentMonthTasks || 0);
   setText(els.stats.completionRate, completion);
+
+  state.personalStats = data?.personal || null;
+  if (data?.currentUser){
+    state.currentUser = data.currentUser;
+  }
+  state.isAdmin = state.currentUser ? String(state.currentUser.level || '').trim().toLowerCase() === 'admin' : state.isAdmin;
+  updateAdminUI();
+
+  if (els.statsPersonal.container){
+    if (state.personalStats){
+      els.statsPersonal.container.classList.remove('hidden');
+      setText(els.headerTotals.myTasks, state.personalStats.totalTasks || 0);
+      setText(els.headerTotals.myUpcoming, state.personalStats.upcomingTasks || 0);
+      setText(els.statsPersonal.completed, state.personalStats.completedTasks || 0);
+      setText(els.statsPersonal.pending, state.personalStats.pendingTasks || 0);
+      setText(els.statsPersonal.month, state.personalStats.currentMonthTasks || 0);
+      setText(els.statsPersonal.upcoming, state.personalStats.upcomingTasks || 0);
+    } else {
+      els.statsPersonal.container.classList.add('hidden');
+      setText(els.headerTotals.myTasks, '-');
+      setText(els.headerTotals.myUpcoming, '-');
+    }
+  }
+
+  if (!state.personalStats){
+    setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
+    setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
+  }
 }
 
 function renderUpcomingTasks(list){
   if (!els.taskCardsContainer) return;
+  if (els.headerTotals.myUpcoming){
+    if (state.isLoggedIn){
+      setText(els.headerTotals.myUpcoming, list.length || 0);
+    } else if (!state.personalStats){
+      setText(els.headerTotals.myUpcoming, '-');
+    }
+  }
   if (!state.isLoggedIn){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-dashed border-blue-200 text-center text-sm text-gray-500">
@@ -415,16 +540,91 @@ function renderTasks(tasks){
     `;
     return;
   }
-  if (!tasks.length){
+  state.tasks = Array.isArray(tasks) ? tasks.slice() : [];
+  state.taskFilters = state.taskFilters || { status:'all', search:'' };
+  state.taskPagination = state.taskPagination || { page:1, pageSize:10, totalPages:1 };
+  state.taskPagination.page = 1;
+  applyTaskFilters();
+}
+
+function applyTaskFilters(){
+  if (!els.allTasksContainer) return;
+  if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ไม่พบงานในระบบ
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
+        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
       </div>
     `;
     return;
   }
-  const html = tasks.map(task=>{
-    const statusClass = task.completed === 'Yes' ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600';
+  const tasks = state.tasks || [];
+  const search = String(state.taskFilters.search || '').trim().toLowerCase();
+  const status = String(state.taskFilters.status || 'all').toLowerCase();
+
+  const filtered = tasks.filter(task=>{
+    const isCompleted = task.completed === 'Yes';
+    if (status === 'completed' && !isCompleted) return false;
+    if (status === 'pending' && isCompleted) return false;
+    if (!search) return true;
+    const haystack = [
+      task.name,
+      task.assignee,
+      task.status,
+      task.dueDate,
+      task.dueDateThai
+    ].map(value=> String(value || '').toLowerCase());
+    return haystack.some(text => text.includes(search));
+  });
+
+  filtered.sort((a,b)=>{
+    const da = parseTaskDue_(a.dueDate);
+    const db = parseTaskDue_(b.dueDate);
+    if (da === db) return String(a.name || '').localeCompare(String(b.name || ''));
+    return da - db;
+  });
+
+  state.filteredTasks = filtered;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / state.taskPagination.pageSize));
+  state.taskPagination.totalPages = totalPages;
+  if (state.taskPagination.page > totalPages){
+    state.taskPagination.page = totalPages;
+  }
+  renderTaskList();
+  renderTaskPagination();
+}
+
+function renderTaskList(){
+  if (!els.allTasksContainer) return;
+  if (!state.isLoggedIn){
+    els.allTasksContainer.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
+        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
+      </div>
+    `;
+    return;
+  }
+  if (!state.filteredTasks.length){
+    els.allTasksContainer.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
+        ไม่พบงานที่ตรงกับเงื่อนไขการค้นหา
+      </div>
+    `;
+    return;
+  }
+  const start = (state.taskPagination.page - 1) * state.taskPagination.pageSize;
+  const end = start + state.taskPagination.pageSize;
+  const items = state.filteredTasks.slice(start, end);
+  const html = items.map(task=>{
+    const isCompleted = task.completed === 'Yes';
+    const statusLabel = task.status || (isCompleted ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
+    const statusClass = isCompleted ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600';
+    const dueDisplay = task.dueDate === 'No Due Date' ? 'ไม่มีวันครบกำหนด' : (task.dueDateThai || task.dueDate);
+    const dueMeta = formatDueMeta_(task.dueDate);
+    const buttonClass = isCompleted
+      ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+      : 'bg-blue-600 hover:bg-blue-700 text-white';
+    const buttonLabel = isCompleted ? 'เสร็จสมบูรณ์แล้ว' : 'ทำเครื่องหมายว่าเสร็จ';
+    const disabledAttr = isCompleted ? 'disabled' : '';
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
@@ -433,27 +633,133 @@ function renderTasks(tasks){
             <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'ไม่มีผู้รับผิดชอบ')}</p>
           </div>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${statusClass}">
-            ${escapeHtml(task.status || (task.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ'))}
+            ${escapeHtml(statusLabel)}
           </span>
         </div>
-        <div class="grid grid-cols-2 gap-2 mt-3 text-xs text-gray-500">
-          <div class="flex items-center space-x-1">
+        <div class="mt-3 text-sm text-gray-600 space-y-1">
+          <div class="flex items-center space-x-2">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(task.dueDate === 'No Due Date' ? 'ไม่มีวันครบกำหนด' : task.dueDate)}</span>
+            <span>${escapeHtml(dueDisplay)}</span>
+            <span class="text-xs text-gray-400">${escapeHtml(dueMeta)}</span>
           </div>
-          <div class="flex items-center space-x-1">
+          <div class="flex items-center space-x-2 text-xs text-gray-500">
             <span class="material-icons text-base text-purple-500">link</span>
             <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เปิดใน Asana</a>
           </div>
         </div>
-        <button class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2" data-action="update-status" data-task-id="${escapeAttr(task.id)}">
-          <span class="material-icons text-base">edit</span>
-          <span>อัปเดตสถานะ</span>
+        <button class="mt-4 w-full ${buttonClass} py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2 transition" data-action="update-status" data-task-id="${escapeAttr(task.id)}" ${disabledAttr}>
+          <span class="material-icons text-base">${isCompleted ? 'task_alt' : 'done'}</span>
+          <span>${buttonLabel}</span>
         </button>
       </div>
     `;
   }).join('');
   els.allTasksContainer.innerHTML = html;
+}
+
+function renderTaskPagination(){
+  if (!els.taskPaginationInfo) return;
+  const wrapper = els.taskPaginationWrapper;
+  if (wrapper){
+    const shouldHide = !state.isLoggedIn || state.filteredTasks.length <= state.taskPagination.pageSize;
+    wrapper.classList.toggle('hidden', shouldHide);
+  }
+  if (!state.filteredTasks.length){
+    els.taskPaginationInfo.textContent = 'ไม่มีงาน';
+    if (els.taskPaginationPrev) els.taskPaginationPrev.disabled = true;
+    if (els.taskPaginationNext) els.taskPaginationNext.disabled = true;
+    return;
+  }
+  const totalPages = state.taskPagination.totalPages || 1;
+  const currentPage = state.taskPagination.page || 1;
+  els.taskPaginationInfo.textContent = `หน้า ${currentPage}/${totalPages}`;
+  if (els.taskPaginationPrev) els.taskPaginationPrev.disabled = currentPage <= 1;
+  if (els.taskPaginationNext) els.taskPaginationNext.disabled = currentPage >= totalPages;
+}
+
+function parseTaskDue_(value){
+  if (!value || value === 'No Due Date') return Number.MAX_SAFE_INTEGER;
+  const iso = `${value}T00:00:00+07:00`;
+  const date = new Date(iso);
+  if (isNaN(date)) return Number.MAX_SAFE_INTEGER;
+  return date.getTime();
+}
+
+function formatDueMeta_(dueDate){
+  if (!dueDate || dueDate === 'No Due Date') return '';
+  const iso = `${dueDate}T00:00:00+07:00`;
+  const due = new Date(iso);
+  if (isNaN(due)) return '';
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  due.setHours(0,0,0,0);
+  const diff = Math.round((due - today)/(24*60*60*1000));
+  if (diff === 0) return 'ครบกำหนดวันนี้';
+  if (diff > 0) return `เหลืออีก ${diff} วัน`;
+  return `เกินกำหนด ${Math.abs(diff)} วัน`;
+}
+
+function updateAdminUI(){
+  if (els.addTaskBtn){
+    if (state.isLoggedIn && state.isAdmin){
+      els.addTaskBtn.classList.remove('hidden');
+    } else {
+      els.addTaskBtn.classList.add('hidden');
+    }
+  }
+}
+
+function showNotifications(){
+  if (!state.isLoggedIn){
+    toastInfo('กรุณาเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
+    return;
+  }
+  if (!state.notifications.length){
+    toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
+    return;
+  }
+  const lines = state.notifications.slice(0, 5).map(task=>{
+    const due = task.dueDateThai || task.dueDate || 'ไม่มีวันครบกำหนด';
+    const meta = formatDueMeta_(task.dueDate);
+    return `• ${task.name} (${due}${meta ? ' • '+meta : ''})`;
+  });
+  const remaining = state.notifications.length - lines.length;
+  const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
+  alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
+}
+
+function promptCreateTask(){
+  if (!state.isLoggedIn){
+    toastInfo('กรุณาเข้าสู่ระบบก่อน');
+    return;
+  }
+  if (!state.isAdmin){
+    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
+    return;
+  }
+  const name = prompt('ชื่อหัวข้องานใหม่');
+  if (!name) return;
+  const assigneeEmail = (prompt('อีเมลผู้รับผิดชอบ (ถ้าไม่มีให้เว้นว่าง)') || '').trim();
+  const dueDate = (prompt('กำหนดส่ง (YYYY-MM-DD) หรือเว้นว่าง') || '').trim();
+  const notes = (prompt('รายละเอียดงาน (ไม่บังคับ)') || '').trim();
+  showLoading(true);
+  jsonpRequest({
+    action:'asana_create_task',
+    name,
+    assigneeEmail,
+    dueDate,
+    notes,
+    idToken: state.profile?.idToken || '',
+    pass: state.apiKey || ''
+  }).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'create task error');
+    }
+    toastInfo('สร้างงานใหม่สำเร็จ');
+    return Promise.all([loadSecureData(), loadPublicData()]);
+  }).catch(err=>{
+    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
+  }).finally(()=> showLoading(false));
 }
 
 function renderUserStats(stats){
@@ -531,6 +837,9 @@ function renderProfilePage(){
     return;
   }
   const profile = state.profile;
+  const userRecord = state.currentUser || {};
+  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'ครู');
+  const lineUidLabel = userRecord.lineUID ? `LINE UID: ${userRecord.lineUID}` : '';
   els.profilePage.innerHTML = `
     <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
       <div class="flex items-center space-x-4 mb-6">
@@ -538,14 +847,16 @@ function renderProfilePage(){
         <div>
           <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'ผู้ใช้งาน')}</h2>
           <p class="text-xs text-gray-500">${escapeHtml(profile.email || profile.userId || '')}</p>
-          <p class="text-xs text-gray-400">${escapeHtml(profile.statusMessage || '')}</p>
+          <p class="text-xs text-emerald-600 font-semibold mt-1">บทบาท: ${escapeHtml(roleLabel)}</p>
+          ${lineUidLabel ? `<p class="text-xs text-gray-400">${escapeHtml(lineUidLabel)}</p>` : ''}
+          <p class="text-xs text-gray-400 mt-1">${escapeHtml(profile.statusMessage || '')}</p>
         </div>
       </div>
       <div class="space-y-3">
         <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition" id="btnSetApiKey">
           <div class="flex items-center space-x-3">
             <span class="material-icons text-gray-600">vpn_key</span>
-            <span class="text-gray-800">ตั้งค่า API Key สำหรับอัปเดตสถานะ</span>
+            <span class="text-gray-800">ตั้งค่า API Key (ผู้ดูแลระบบ)</span>
           </div>
           <span class="material-icons text-gray-400">chevron_right</span>
         </button>
@@ -578,6 +889,11 @@ function renderProfilePage(){
   }
   const btnSetApiKey = document.getElementById('btnSetApiKey');
   if (btnSetApiKey){
+    if (!state.isAdmin){
+      btnSetApiKey.classList.add('hidden');
+    }else{
+      btnSetApiKey.classList.remove('hidden');
+    }
     btnSetApiKey.addEventListener('click', ()=>{
       const current = state.apiKey ? '*** ตั้งค่าแล้ว ***' : 'ยังไม่ได้ตั้งค่า';
       const input = prompt(`กรอกรหัส API KEY สำหรับแก้ไขสถานะ\nสถานะปัจจุบัน: ${current}`);
@@ -603,6 +919,7 @@ function renderProfilePage(){
         .finally(()=> showLoading(false));
     });
   }
+  updateAdminUI();
 }
 
 function handleUpdateStatus(taskId){
@@ -610,37 +927,34 @@ function handleUpdateStatus(taskId){
     toastInfo('ต้องเข้าสู่ระบบก่อน');
     return;
   }
-  if (!state.apiKey){
-    toastInfo('กรุณาตั้งค่า API Key ในหน้าโปรไฟล์ก่อน');
-    return;
-  }
   const task = state.tasks.find(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
-  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
-  const newStatus = prompt(`อัปเดตสถานะสำหรับงาน ${taskId}\nสถานะปัจจุบัน: ${currentStatus}\nกรอกสถานะใหม่:`);
-  if (newStatus === null) return;
-  const trimmed = newStatus.trim();
-  if (!trimmed){
-    toastInfo('สถานะต้องไม่ว่าง');
+  if (!task){
+    toastInfo('ไม่พบงานที่เลือก');
     return;
   }
+  if (task.completed === 'Yes'){
+    toastInfo('งานนี้ทำเสร็จแล้ว');
+    return;
+  }
+  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
+  const confirmDone = confirm(`ยืนยันทำเครื่องหมายว่างาน "${task.name}" เสร็จสมบูรณ์หรือไม่?\nสถานะปัจจุบัน: ${currentStatus}`);
+  if (!confirmDone) return;
   showLoading(true);
   jsonpRequest({
     action: 'update_status',
     taskId,
-    status: trimmed,
-    pass: state.apiKey,
+    status: 'เสร็จสมบูรณ์',
     idToken: state.profile?.idToken || ''
   }).then(res=>{
     if (!res || res.success === false){
       throw new Error(res?.message || 'update failed');
     }
     toastInfo('อัปเดตสถานะเรียบร้อย');
-    return loadSecureData();
+    return Promise.all([loadSecureData(), loadPublicData()]);
   }).catch(err=>{
     handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
   }).finally(()=> showLoading(false));
 }
-
 function jsonpRequest(params){
   return new Promise((resolve, reject)=>{
     const callbackName = `jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;

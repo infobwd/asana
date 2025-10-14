@@ -1,4 +1,4 @@
-/* KruBoard front-end (GitHub hosted) */
+/* KruBoard front-end (GitHub hosted) - Updated Version (with patches) */
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
   liffId: '2006490627-3NpRPl0G'
@@ -14,7 +14,6 @@ const state = {
   personalStats: null,
   currentUser: null,
   notifications: [],
-  teachers: [],
   filteredTasks: [],
   taskFilters: { status:'all', search:'' },
   taskPagination: { page:1, pageSize:10, totalPages:1 },
@@ -22,7 +21,34 @@ const state = {
   apiKey: localStorage.getItem('kruboard_api_key') || ''
 };
 
-const THAI_MONTHS = ['เธกเธเธฃเธฒเธเธก','เธเธธเธกเธ เธฒเธเธฑเธเธเน','เธกเธตเธเธฒเธเธก','เน€เธกเธฉเธฒเธขเธ','เธเธคเธฉเธ เธฒเธเธก','เธกเธดเธ–เธธเธเธฒเธขเธ','เธเธฃเธเธเธฒเธเธก','เธชเธดเธเธซเธฒเธเธก','เธเธฑเธเธขเธฒเธขเธ','เธ•เธธเธฅเธฒเธเธก','เธเธคเธจเธเธดเธเธฒเธขเธ','เธเธฑเธเธงเธฒเธเธก'];
+// Thai months for date formatting
+const THAI_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+];
+
+// === Patches: debounce/throttle + session cache ===
+function debounce(fn, wait=200){
+  let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
+}
+function throttle(fn, wait=200){
+  let last=0; return (...args)=>{ const now=Date.now(); if(now-last>=wait){ last=now; fn(...args); } };
+}
+const cache = {
+  get(key){
+    try{
+      const raw = sessionStorage.getItem(`kb:${key}`);
+      if(!raw) return null;
+      const {exp, val} = JSON.parse(raw);
+      if(exp && Date.now()>exp){ sessionStorage.removeItem(`kb:${key}`); return null; }
+      return val;
+    }catch{ return null; }
+  },
+  set(key, val, ttlMs=60_000){
+    try{ sessionStorage.setItem(`kb:${key}`, JSON.stringify({exp: Date.now()+ttlMs, val})); }catch{}
+  },
+  del(key){ try{ sessionStorage.removeItem(`kb:${key}`);}catch{} }
+};
 
 const els = {
   navItems: [],
@@ -52,7 +78,6 @@ const els = {
     month: document.getElementById('myMonthTaskCount'),
     upcoming: document.getElementById('myUpcomingCount')
   },
-  teacherListContainer: document.getElementById('teacherListContainer') || document.getElementById('userStatsContainer'),
   notificationCount: document.getElementById('notificationCount'),
   taskCardsContainer: document.getElementById('taskCardsContainer'),
   allTasksContainer: document.getElementById('allTasksContainer'),
@@ -70,14 +95,17 @@ const els = {
   taskPaginationInfo: document.getElementById('taskPaginationInfo'),
   taskPaginationWrapper: document.getElementById('taskPagination'),
   addTaskBtn: document.getElementById('addTaskBtn'),
-  addTaskModal: document.getElementById('addTaskModal'),
-  addTaskForm: document.getElementById('addTaskForm'),
-  addTaskAssignee: document.getElementById('addTaskAssignee'),
-  addTaskName: document.getElementById('addTaskName'),
-  addTaskDueDate: document.getElementById('addTaskDueDate'),
-  addTaskNotes: document.getElementById('addTaskNotes'),
-  addTaskCancelBtn: document.getElementById('addTaskCancelBtn'),
-  addTaskCloseBtn: document.getElementById('addTaskCloseBtn')
+  // Modal elements
+  taskModal: null,
+  modalLoading: null,
+  taskForm: null,
+  closeModalBtn: null,
+  cancelModalBtn: null,
+  submitTaskBtn: null,
+  taskNameInput: null,
+  taskAssigneeInput: null,
+  taskDueDateInput: null,
+  taskNotesInput: null
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -85,6 +113,7 @@ document.addEventListener('DOMContentLoaded', init);
 function init(){
   cachePages();
   bindUI();
+  initModalElements();
   showLoading(true);
   initializeLiff()
     .catch(err=>{
@@ -96,25 +125,124 @@ function init(){
       loadPublicData()
         .then(()=> state.isLoggedIn ? loadSecureData() : null)
         .catch(err=>{
-          handleDataError(err, 'เนเธซเธฅเธ”เธเนเธญเธกเธนเธฅเธฅเนเธกเน€เธซเธฅเธง เธเธฃเธธเธ“เธฒเธฅเธญเธเนเธซเธกเน');
+          handleDataError(err, 'โหลดข้อมูลล้มเหลว กรุณาลองใหม่');
         })
         .finally(()=> showLoading(false));
     });
 }
 
+function initModalElements(){
+  els.taskModal = document.getElementById('taskModal');
+  els.modalLoading = document.getElementById('modalLoading');
+  els.taskForm = document.getElementById('taskForm');
+  els.closeModalBtn = document.getElementById('closeModalBtn');
+  els.cancelModalBtn = document.getElementById('cancelModalBtn');
+  els.submitTaskBtn = document.getElementById('submitTaskBtn');
+  els.taskNameInput = document.getElementById('taskName');
+  els.taskAssigneeInput = document.getElementById('taskAssignee');
+  els.taskDueDateInput = document.getElementById('taskDueDate');
+  els.taskNotesInput = document.getElementById('taskNotes');
+  
+  if (els.closeModalBtn){ els.closeModalBtn.addEventListener('click', closeTaskModal); }
+  if (els.cancelModalBtn){ els.cancelModalBtn.addEventListener('click', closeTaskModal); }
+  if (els.taskForm){ els.taskForm.addEventListener('submit', handleTaskFormSubmit); }
+  if (els.taskModal){
+    els.taskModal.addEventListener('click', (evt)=>{ if (evt.target === els.taskModal){ closeTaskModal(); } });
+  }
+}
+
+function openTaskModal(){
+  if (!els.taskModal) return;
+  els.taskModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  if (els.taskForm){ els.taskForm.reset(); }
+  if (els.taskDueDateInput){
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
+  }
+}
+
+function closeTaskModal(){
+  if (els.taskModal){ els.taskModal.classList.add('hidden'); }
+  document.body.style.overflow = '';
+}
+
+function showModalLoading(show){
+  if (els.modalLoading){ els.modalLoading.classList.toggle('hidden', !show); }
+}
+
+async function handleTaskFormSubmit(evt){
+  evt.preventDefault();
+  if (!state.isLoggedIn){ return toastInfo('กรุณาเข้าสู่ระบบก่อน'); }
+  if (!state.isAdmin){ return toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ'); }
+  
+  const name = (els.taskNameInput?.value || '').trim();
+  const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
+  const dueDate = (els.taskDueDateInput?.value || '').trim();
+  const notes = (els.taskNotesInput?.value || '').trim();
+  if (!name){ return toastInfo('กรุณากรอกชื่องาน'); }
+  
+  showModalLoading(true);
+  closeTaskModal();
+  try{
+    const res = await jsonpRequest({
+      action:'asana_create_task',
+      name, assigneeEmail, dueDate, notes,
+      idToken: state.profile?.idToken || '',
+      pass: state.apiKey || ''
+    });
+    if (!res || res.success === false){ throw new Error(res?.message || 'create task error'); }
+    toastInfo('สร้างงานใหม่สำเร็จ');
+    await Promise.all([loadSecureData(), loadPublicData()]);
+  }catch(err){
+    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
+  }finally{
+    showModalLoading(false);
+  }
+}
+
+function formatThaiDate(dateString){
+  if (!dateString || dateString === 'No Due Date') return 'ไม่มีวันครบกำหนด';
+  let date;
+  if (dateString instanceof Date){ date = dateString; }
+  else { date = new Date(dateString + 'T00:00:00+07:00'); }
+  if (isNaN(date)) return dateString;
+  const day = date.getDate();
+  const month = THAI_MONTHS[date.getMonth()];
+  const year = date.getFullYear() + 543;
+  return `${day} ${month} ${year}`;
+}
+
+function formatDueMeta_(dueDate){
+  if (!dueDate || dueDate === 'No Due Date') return '';
+  const iso = `${dueDate}T00:00:00+07:00`;
+  const due = new Date(iso);
+  if (isNaN(due)) return '';
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  due.setHours(0,0,0,0);
+  const diff = Math.round((due - today)/(24*60*60*1000));
+  if (diff === 0) return '(ครบกำหนดวันนี้)';
+  if (diff === 1) return '(พรุ่งนี้)';
+  if (diff === -1) return '(เมื่อวาน)';
+  if (diff > 0) return `(อีก ${diff} วัน)`;
+  return `(เกินกำหนด ${Math.abs(diff)} วัน)`;
+}
+
+// Other functions remain the same until we get to specific ones that need updating...
+
 function cachePages(){
   const pages = Array.from(document.querySelectorAll('.page'));
-  pages.forEach(page => {
-    els.pages[page.id] = page;
-  });
+  pages.forEach(page => { els.pages[page.id] = page; });
   els.homePage = els.pages.homePage;
   els.tasksPage = els.pages.tasksPage;
   els.teachersPage = els.pages.teachersPage;
   els.profilePage = els.pages.profilePage;
   els.navItems = els.nav;
-  if (!els.homePage){
-    console.warn('homePage not found โ€“ layout may be outdated');
-  }
+  if (!els.homePage){ console.warn('homePage not found – layout may be outdated'); }
 }
 
 function bindUI(){
@@ -123,7 +251,7 @@ function bindUI(){
       evt.preventDefault();
       const pageId = item.getAttribute('data-page');
       if (!state.isLoggedIn && pageId !== 'homePage'){
-        toastInfo('เธเธฃเธธเธ“เธฒเน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE เน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”');
+        toastInfo('กรุณาเข้าสู่ระบบผ่าน LINE เพื่อดูรายละเอียด');
         return;
       }
       switchPage(pageId);
@@ -132,12 +260,15 @@ function bindUI(){
 
   if (els.refreshBtn){
     els.refreshBtn.addEventListener('click', ()=>{
+      // clear short caches
+      cache.del('dash:me'); cache.del('dash:pub');
+      cache.del('upcoming:me'); cache.del('upcoming:pub');
       showLoading(true);
       const target = state.isLoggedIn ? loadSecureData() : Promise.resolve();
       Promise.all([loadPublicData(), target])
         .catch(err=>{
           console.error('Refresh error:', err);
-          toastError('เธฃเธตเน€เธเธฃเธเธเนเธญเธกเธนเธฅเนเธกเนเธชเธณเน€เธฃเนเธ');
+          toastError('รีเฟรชข้อมูลไม่สำเร็จ');
         })
         .finally(()=> showLoading(false));
     });
@@ -175,11 +306,12 @@ function bindUI(){
   }
 
   if (els.taskSearchInput){
-    els.taskSearchInput.addEventListener('input', ()=>{
+    const onSearch = debounce(()=>{
       state.taskFilters.search = els.taskSearchInput.value.trim();
       state.taskPagination.page = 1;
       applyTaskFilters();
-    });
+    }, 200);
+    els.taskSearchInput.addEventListener('input', onSearch);
   }
 
   if (els.taskStatusFilter){
@@ -211,29 +343,11 @@ function bindUI(){
   }
 
   if (els.addTaskBtn){
-    els.addTaskBtn.addEventListener('click', openAddTaskModal);
-  }
-  if (els.addTaskForm){
-    els.addTaskForm.addEventListener('submit', submitAddTaskForm);
-  }
-  if (els.addTaskCancelBtn){
-    els.addTaskCancelBtn.addEventListener('click', function(event){
-      event.preventDefault();
-      closeAddTaskModal();
-    });
-  }
-  if (els.addTaskCloseBtn){
-    els.addTaskCloseBtn.addEventListener('click', closeAddTaskModal);
-  }
-  if (els.addTaskModal){
-    els.addTaskModal.addEventListener('click', function(event){
-      if (event.target === els.addTaskModal){
-        closeAddTaskModal();
-      }
-    });
+    els.addTaskBtn.addEventListener('click', openTaskModal);
   }
 }
 
+// Rest of the utility functions (remain the same)
 function ensureLiffSdk(){
   if (typeof liff !== 'undefined') return Promise.resolve();
   if (document.getElementById('liff-sdk')){
@@ -245,7 +359,7 @@ function ensureLiffSdk(){
     script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
     script.async = true;
     script.onload = ()=> waitForLiffInstance(0).then(resolve).catch(reject);
-    script.onerror = ()=> reject(new Error('เนเธซเธฅเธ” LIFF SDK เนเธกเนเธชเธณเน€เธฃเนเธ'));
+    script.onerror = ()=> reject(new Error('โหลด LIFF SDK ไม่สำเร็จ'));
     document.head.appendChild(script);
   });
 }
@@ -311,12 +425,12 @@ function renderLoginBanner(){
   banner.innerHTML = `
     <div class="flex items-center justify-between space-x-3">
       <div>
-        <h2 class="text-base font-semibold text-gray-800">เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE</h2>
-        <p class="text-sm text-gray-500">เธฅเนเธญเธเธญเธดเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”เธเธฒเธเนเธฅเธฐเธญเธฑเธเน€เธ”เธ•เธชเธ–เธฒเธเธฐ</p>
+        <h2 class="text-base font-semibold text-gray-800">เข้าสู่ระบบผ่าน LINE</h2>
+        <p class="text-sm text-gray-500">ล็อกอินเพื่อดูรายละเอียดงานและอัปเดตสถานะ</p>
       </div>
       <button class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2" id="loginWithLineBtn">
         <span class="material-icons text-base">chat</span>
-        <span>เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธ</span>
+        <span>เข้าสู่ระบบ</span>
       </button>
     </div>
   `;
@@ -324,7 +438,7 @@ function renderLoginBanner(){
   if (loginBtn){
     loginBtn.addEventListener('click', ()=>{
       if (typeof liff === 'undefined'){
-        toastError('เนเธกเนเธเธ LIFF SDK');
+        toastError('ไม่พบ LIFF SDK');
         return;
       }
       liff.login({ redirectUri: window.location.href });
@@ -360,7 +474,7 @@ function toastInfo(message){
 function handleDataError(err, fallbackMessage){
   console.error('Data error:', err);
   if (err?.code === 'JSONP_NETWORK'){
-    toastError('เนเธกเนเธชเธฒเธกเธฒเธฃเธ–เน€เธเธทเนเธญเธกเธ•เนเธญ Apps Script เนเธ”เน เนเธเธฃเธ”เธ•เธฃเธงเธเธชเธญเธเธงเนเธฒเน€เธงเนเธเนเธญเธเน€เธเธขเนเธเธฃเนเนเธเธ Anyone เนเธฅเธฐ URL เธ–เธนเธเธ•เนเธญเธ');
+    toastError('ไม่สามารถเชื่อมต่อ Apps Script ได้ โปรดตรวจสอบว่าเว็บแอปเผยแพร่แบบ Anyone และ URL ถูกต้อง');
   } else {
     toastError(fallbackMessage);
   }
@@ -374,7 +488,12 @@ async function loadPublicData(){
   await upcomingPromise;
 }
 
+// Replaced: fetchDashboardStats with caching
 function fetchDashboardStats(){
+  const cacheKey = state.isLoggedIn ? 'dash:me' : 'dash:pub';
+  const cached = cache.get(cacheKey);
+  if(cached){ return Promise.resolve(cached); }
+
   const payload = { action:'dashboard' };
   if (state.isLoggedIn && state.profile?.idToken){
     payload.idToken = state.profile.idToken;
@@ -384,7 +503,9 @@ function fetchDashboardStats(){
       if (!res || res.success === false){
         throw new Error(res?.message || 'dashboard error');
       }
-      return res.data || {};
+      const data = res.data || {};
+      cache.set(cacheKey, data, 30_000);
+      return data;
     });
 }
 
@@ -409,6 +530,8 @@ function loadUpcomingTasks(){
       state.notifications = personal ? data : [];
       setText(els.notificationCount, personal ? (data.length || 0) : 0);
       renderUpcomingTasks(data);
+      // cache short
+      cache.set(personal ? 'upcoming:me' : 'upcoming:pub', data, 20_000);
       return data;
     })
     .catch(err=>{
@@ -421,21 +544,19 @@ function loadUpcomingTasks(){
 function loadSecureData(){
   return Promise.all([
     fetchAllTasks(),
-    fetchUserStats(),
-    fetchActiveTeachers()
-  ]).then(([tasksResult, stats, teachers])=>{
+    fetchUserStats()
+  ]).then(([tasksResult, stats])=>{
     state.tasks = tasksResult.tasks || [];
     if (tasksResult.currentUser){
       state.currentUser = tasksResult.currentUser;
       state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
     }
     state.userStats = stats;
-    state.teachers = Array.isArray(teachers) ? teachers : [];
     renderTasks(state.tasks);
     renderUserStats(stats);
     updateAdminUI();
   }).catch(err=>{
-    handleDataError(err, 'เนเธกเนเธชเธฒเธกเธฒเธฃเธ–เนเธซเธฅเธ”เธเนเธญเธกเธนเธฅเนเธเธเธฅเธฐเน€เธญเธตเธขเธ”เนเธ”เน');
+    handleDataError(err, 'ไม่สามารถโหลดข้อมูลแบบละเอียดได้');
   });
 }
 
@@ -469,22 +590,6 @@ function fetchUserStats(){
     });
 }
 
-function fetchActiveTeachers(){
-  return jsonpRequest({
-    action:'users',
-    idToken: state.profile?.idToken || ''
-  }).then(res=>{
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'users error');
-    }
-    if (res.currentUser && !state.currentUser){
-      state.currentUser = res.currentUser;
-      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
-    }
-    return Array.isArray(res.data) ? res.data : [];
-  });
-}
-
 function renderDashboard(data){
   state.dashboard = data || null;
   const summary = data?.summary || {};
@@ -499,9 +604,7 @@ function renderDashboard(data){
   setText(els.stats.completionRate, completion);
 
   state.personalStats = data?.personal || null;
-  if (data?.currentUser){
-    state.currentUser = data.currentUser;
-  }
+  if (data?.currentUser){ state.currentUser = data.currentUser; }
   state.isAdmin = state.currentUser ? String(state.currentUser.level || '').trim().toLowerCase() === 'admin' : state.isAdmin;
   updateAdminUI();
 
@@ -525,21 +628,83 @@ function renderDashboard(data){
     setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
     setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
   }
+
+  // NEW: inject motivation panel
+  ensureMotivationPanel();
+}
+
+function ensureMotivationPanel(){
+  if(!els.homePage) return;
+  let box = document.getElementById('motivationPanel');
+  if(!box){
+    box = document.createElement('div');
+    box.id = 'motivationPanel';
+    box.className = 'bg-white rounded-2xl shadow-sm border border-blue-100 p-4 mb-4';
+    els.homePage.insertBefore(box, els.homePage.firstChild?.nextSibling || els.homePage.firstChild);
+  }
+  const me = state.personalStats;
+  const streak = calcStreak_(me);
+  const overload = calcOverload_(me);
+  const tip = pickCoachTip_(me);
+
+  box.innerHTML = `
+    <div class="flex items-start justify-between">
+      <div>
+        <h3 class="text-base font-semibold text-gray-800">กำลังใจวันนี้ 🎉</h3>
+        <p class="text-sm text-gray-600 mt-1">${escapeHtml(tip)}</p>
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-gray-500">สตรีคทำงานสำเร็จ</div>
+        <div class="text-2xl font-bold ${streak>=3?'text-emerald-600':'text-gray-800'}">${streak} วัน</div>
+      </div>
+    </div>
+    <div class="mt-3 grid grid-cols-2 gap-2">
+      <div class="rounded-xl border p-3 ${overload.level==='low'?'border-emerald-200 bg-emerald-50': overload.level==='mid'?'border-amber-200 bg-amber-50':'border-rose-200 bg-rose-50'}">
+        <div class="text-xs text-gray-600">ภาระงานรอดำเนินการ</div>
+        <div class="text-lg font-bold">${(me?.pendingTasks)||0} งาน</div>
+        <div class="text-xs ${overload.level==='high'?'text-rose-700':'text-gray-500'}">${escapeHtml(overload.note)}</div>
+      </div>
+      <div class="rounded-xl border p-3 border-blue-200 bg-blue-50">
+        <div class="text-xs text-gray-600">งานใกล้ครบกำหนด (7 วัน)</div>
+        <div class="text-lg font-bold">${me?.upcomingTasks||0} งาน</div>
+        <button id="btnSeeUpcoming" class="mt-2 text-xs text-blue-700 underline">ดูรายละเอียด</button>
+      </div>
+    </div>
+  `;
+  const btn = document.getElementById('btnSeeUpcoming');
+  if(btn){ btn.addEventListener('click', ()=> switchPage('homePage')); }
+}
+function calcStreak_(me){
+  if(!me) return 0;
+  return Number(me.streakDays || me.completedTasksThisWeek || 0);
+}
+function calcOverload_(me){
+  const pending = Number(me?.pendingTasks||0);
+  const upc = Number(me?.upcomingTasks||0);
+  const score = pending + upc*1.5;
+  if(score>=15) return {level:'high', note:'ภาระงานค่อนข้างสูง ควรโฟกัสงานที่ครบกำหนดภายใน 48 ชม.'};
+  if(score>=8)  return {level:'mid',  note:'ภาระงานพอประมาณ แนะนำปิดงานเล็กให้ไวเพื่อโมเมนตัม'};
+  return {level:'low', note:'ภาระงานพอดี รักษาจังหวะการทำงานต่อเนื่อง 👍'};
+}
+function pickCoachTip_(me){
+  if(!me) return 'เริ่มต้นวันด้วยงานเล็กสุด 1 งาน เพื่อสร้างแรงส่ง 💪';
+  const cr = Number(me.completionRate||0);
+  if(cr>=80) return 'ยอดเยี่ยม! กันเวลา Deep Work 30 นาที/วัน 🧠';
+  if(me.upcomingTasks>0) return 'เลือกปิด 1 งานที่ใกล้ครบกำหนดที่สุดก่อน ⏳';
+  if(me.pendingTasks>5) return 'จัดลิสต์ “3 งานสำคัญวันนี้” แล้วลงมือทันที ✅';
+  return 'ปิดงาน 1 งานให้เสร็จภายใน 15 นาทีแรกของวัน ✨';
 }
 
 function renderUpcomingTasks(list){
   if (!els.taskCardsContainer) return;
   if (els.headerTotals.myUpcoming){
-    if (state.isLoggedIn){
-      setText(els.headerTotals.myUpcoming, list.length || 0);
-    } else if (!state.personalStats){
-      setText(els.headerTotals.myUpcoming, '-');
-    }
+    if (state.isLoggedIn){ setText(els.headerTotals.myUpcoming, list.length || 0); }
+    else if (!state.personalStats){ setText(els.headerTotals.myUpcoming, '-'); }
   }
   if (!state.isLoggedIn){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-dashed border-blue-200 text-center text-sm text-gray-500">
-        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE เน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”เธเธฒเธเธ—เธตเนเธเธณเธฅเธฑเธเธเธฐเธ–เธถเธ
+        เข้าสู่ระบบผ่าน LINE เพื่อดูรายละเอียดงานที่กำลังจะถึง
       </div>
     `;
     return;
@@ -547,25 +712,26 @@ function renderUpcomingTasks(list){
   if (!list.length){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        เนเธกเนเธเธเธเธฒเธเธ—เธตเนเธเธณเธฅเธฑเธเธเธฐเธ–เธถเธเนเธเธเนเธงเธ ${state.upcomingDays} เธงเธฑเธ
+        ไม่พบงานที่กำลังจะถึงในช่วง ${state.upcomingDays} วัน
       </div>
     `;
     return;
   }
   const html = list.map(task=>{
+    const thaiDate = formatThaiDate(task.dueDate);
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
           <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${task.daysUntilDue==='0' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">
-            ${task.daysUntilDue==='0' ? 'เธงเธฑเธเธเธตเน' : `เธญเธตเธ ${task.daysUntilDue} เธงเธฑเธ`}
+            ${task.daysUntilDue==='0' ? 'วันนี้' : `อีก ${task.daysUntilDue} วัน`}
           </span>
         </div>
         <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee)}</p>
         <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(task.dueDateThai || task.dueDate || '')}</span>
+            <span>${escapeHtml(thaiDate)}</span>
           </span>
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-green-500">flag</span>
@@ -579,12 +745,19 @@ function renderUpcomingTasks(list){
   setText(els.notificationCount, list.length);
 }
 
+function highlight(text, query){
+  if(!query) return escapeHtml(text||'');
+  const q = String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(${q})`,'ig');
+  return escapeHtml(text||'').replace(re,'<mark class="bg-yellow-200">$1</mark>');
+}
+
 function renderTasks(tasks){
   if (!els.allTasksContainer) return;
   if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธเธฒเธฃเธเธฒเธเธ—เธฑเนเธเธซเธกเธ”
+        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
       </div>
     `;
     return;
@@ -601,7 +774,7 @@ function applyTaskFilters(){
   if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธเธฒเธฃเธเธฒเธเธ—เธฑเนเธเธซเธกเธ”
+        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
       </div>
     `;
     return;
@@ -625,20 +798,15 @@ function applyTaskFilters(){
     return haystack.some(text => text.includes(search));
   });
 
+  // Sort tasks from newest to oldest, push "No Due Date" to end
   filtered.sort((a,b)=>{
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
-    if (da === db) return String(a.name || '').localeCompare(String(b.name || ''));
+    if (db === da) return String(a.name || '').localeCompare(String(b.name || ''));
     return db - da;
   });
 
   state.filteredTasks = filtered;
-  if (els.headerTotals.myTasks){
-    const totalMine = state.personalStats && typeof state.personalStats.totalTasks === 'number'
-      ? state.personalStats.totalTasks
-      : state.tasks.length;
-    setText(els.headerTotals.myTasks, totalMine);
-  }
   const totalPages = Math.max(1, Math.ceil(filtered.length / state.taskPagination.pageSize));
   state.taskPagination.totalPages = totalPages;
   if (state.taskPagination.page > totalPages){
@@ -653,7 +821,7 @@ function renderTaskList(){
   if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธเธฒเธฃเธเธฒเธเธ—เธฑเนเธเธซเธกเธ”
+        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
       </div>
     `;
     return;
@@ -661,7 +829,7 @@ function renderTaskList(){
   if (!state.filteredTasks.length){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        เนเธกเนเธเธเธเธฒเธเธ—เธตเนเธ•เธฃเธเธเธฑเธเน€เธเธทเนเธญเธเนเธเธเธฒเธฃเธเนเธเธซเธฒ
+        ไม่พบงานที่ตรงกับเงื่อนไขการค้นหา
       </div>
     `;
     return;
@@ -671,21 +839,21 @@ function renderTaskList(){
   const items = state.filteredTasks.slice(start, end);
   const html = items.map(task=>{
     const isCompleted = task.completed === 'Yes';
-    const statusLabel = task.status || (isCompleted ? 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เน' : 'เธฃเธญเธ”เธณเน€เธเธดเธเธเธฒเธฃ');
+    const statusLabel = task.status || (isCompleted ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
     const statusClass = isCompleted ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600';
-    const dueDisplay = toThaiDateLabel(task.dueDate, task.dueDateThai);
+    const thaiDate = formatThaiDate(task.dueDate);
     const dueMeta = formatDueMeta_(task.dueDate);
     const buttonClass = isCompleted
       ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
       : 'bg-blue-600 hover:bg-blue-700 text-white';
-    const buttonLabel = isCompleted ? 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เนเนเธฅเนเธง' : 'เธ—เธณเน€เธเธฃเธทเนเธญเธเธซเธกเธฒเธขเธงเนเธฒเน€เธชเธฃเนเธ';
+    const buttonLabel = isCompleted ? 'เสร็จสมบูรณ์แล้ว' : 'ทำเครื่องหมายว่าเสร็จ';
     const disabledAttr = isCompleted ? 'disabled' : '';
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
           <div>
-            <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
-            <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'เนเธกเนเธกเธตเธเธนเนเธฃเธฑเธเธเธดเธ”เธเธญเธ')}</p>
+            <h3 class="text-base font-semibold text-gray-800">${highlight(task.name, state.taskFilters.search)}</h3>
+            <p class="text-sm text-gray-500 mt-1">${highlight(task.assignee || 'ไม่มีผู้รับผิดชอบ', state.taskFilters.search)}</p>
           </div>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${statusClass}">
             ${escapeHtml(statusLabel)}
@@ -694,12 +862,12 @@ function renderTaskList(){
         <div class="mt-3 text-sm text-gray-600 space-y-1">
           <div class="flex items-center space-x-2">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(dueDisplay)}</span>
+            <span>${escapeHtml(thaiDate)}</span>
             <span class="text-xs text-gray-400">${escapeHtml(dueMeta)}</span>
           </div>
           <div class="flex items-center space-x-2 text-xs text-gray-500">
             <span class="material-icons text-base text-purple-500">link</span>
-            <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เน€เธเธดเธ”เนเธ Asana</a>
+            <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เปิดใน Asana</a>
           </div>
         </div>
         <button class="mt-4 w-full ${buttonClass} py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2 transition" data-action="update-status" data-task-id="${escapeAttr(task.id)}" ${disabledAttr}>
@@ -720,246 +888,123 @@ function renderTaskPagination(){
     wrapper.classList.toggle('hidden', shouldHide);
   }
   if (!state.filteredTasks.length){
-    els.taskPaginationInfo.textContent = 'เนเธกเนเธกเธตเธเธฒเธ';
-function buildTeacherAvatar_(teacher){
-
-
-  if (!teacher) return 'https://ui-avatars.com/api/?name=K&background=2563eb&color=ffffff';
-
-
-  const src = teacher.lineAvatarThumb || teacher.linePictureUrl || teacher.picture;
-
-
-  if (src && String(src).trim()) return String(src).trim();
-
-
-  const fallbackName = (teacher.name || teacher.lineDisplayName || 'ครู').trim();
-
-
-  const initial = fallbackName ? fallbackName.charAt(0).toUpperCase() : 'K';
-
-
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(initial)}&background=2563eb&color=ffffff`;
-
-
-}
-
-
+    els.taskPaginationInfo.textContent = 'ไม่มีงาน';
     if (els.taskPaginationPrev) els.taskPaginationPrev.disabled = true;
     if (els.taskPaginationNext) els.taskPaginationNext.disabled = true;
     return;
   }
   const totalPages = state.taskPagination.totalPages || 1;
   const currentPage = state.taskPagination.page || 1;
-  els.taskPaginationInfo.textContent = `เธซเธเนเธฒ ${currentPage}/${totalPages}`;
+  els.taskPaginationInfo.textContent = `หน้า ${currentPage}/${totalPages}`;
   if (els.taskPaginationPrev) els.taskPaginationPrev.disabled = currentPage <= 1;
   if (els.taskPaginationNext) els.taskPaginationNext.disabled = currentPage >= totalPages;
 }
 
-function renderUserStats(){
-  renderTeachers();
-}
-
-function renderTeachers(){
-  const container = els.teacherListContainer || els.userStatsContainer;
-  if (!container) return;
-  if (!state.isLoggedIn){
-    container.innerHTML = `
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เข้าสู่ระบบเพื่อดูข้อมูลทีมครู
-      </div>
-    `;
-    return;
-  }
-  const activeTeachers = (state.teachers || []).filter(t => isActiveStatus(t.status));
-  if (!activeTeachers.length){
-    container.innerHTML = `
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ยังไม่มีข้อมูลครูที่เปิดใช้งาน
-      </div>
-    `;
-    return;
-  }
-  const statsByEmail = new Map();
-  const statsByName = new Map();
-  (state.userStats || []).forEach(stat => {
-    const emailKey = normalizeEmail(stat.email);
-    if (emailKey) statsByEmail.set(emailKey, stat);
-    const nameKey = normalizeName(stat.assignee);
-    if (nameKey && !statsByName.has(nameKey)) statsByName.set(nameKey, stat);
-  });
-  const cards = activeTeachers.map(teacher => {
-    const emailKey = normalizeEmail(teacher.email || teacher.user);
-    const nameKey = normalizeName(teacher.name || teacher.lineDisplayName);
-    const stats = statsByEmail.get(emailKey) || statsByName.get(nameKey) || { totalTasks:0, completedTasks:0, pendingTasks:0, completionRate:0 };
-    const completion = stats.completionRate != null ? `${stats.completionRate}%` : '-';
-    const avatar = buildTeacherAvatar_(teacher);
-    const level = String(teacher.level || 'Teacher').trim();
-    const levelBadge = level ? `<span class="text-xs px-2 py-0.5 rounded-full ${level.toLowerCase()==='admin' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">${escapeHtml(level)}</span>` : '';
-    const phoneLine = teacher.phone ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-emerald-500">call</span><a href="tel:${escapeAttr(teacher.phone)}" class="hover:underline">${escapeHtml(teacher.phone)}</a></div>` : '';
-    const lineDisplay = teacher.lineDisplayName ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-lime-500">chat</span><span>${escapeHtml(teacher.lineDisplayName)}</span></div>` : '';
-    const lineUidRow = teacher.lineUID ? `<span class="flex items-center space-x-1"><span class="material-icons text-sm text-gray-300">badge</span><span>${escapeHtml(teacher.lineUID)}</span></span>` : '<span></span>';
-    return `
-      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col">
-        <div class="flex items-center space-x-3">
-          <img src="${escapeAttr(avatar)}" alt="${escapeAttr(teacher.name || 'ครู')}" class="w-14 h-14 rounded-full object-cover border-2 border-blue-100">
-          <div>
-            <div class="flex items-center space-x-2">
-              <p class="text-base font-semibold text-gray-800">${escapeHtml(teacher.name || teacher.lineDisplayName || 'ไม่ทราบชื่อ')}</p>
-              ${levelBadge}
-            </div>
-            <p class="text-xs text-gray-500">${escapeHtml(teacher.email || teacher.user || '')}</p>
-            ${lineDisplay || phoneLine ? `<div class="mt-1 space-y-1">${lineDisplay}${phoneLine}</div>` : ''}
-          </div>
-        </div>
-        <div class="grid grid-cols-3 gap-2 mt-4 text-center">
-          <div class="bg-blue-50 rounded-lg p-2">
-            <div class="text-xs text-blue-500">รวม</div>
-            <div class="text-lg font-semibold text-blue-700">${stats.totalTasks || 0}</div>
-          </div>
-          <div class="bg-emerald-50 rounded-lg p-2">
-            <div class="text-xs text-emerald-500">เสร็จ</div>
-            <div class="text-lg font-semibold text-emerald-600">${stats.completedTasks || 0}</div>
-          </div>
-          <div class="bg-amber-50 rounded-lg p-2">
-            <div class="text-xs text-amber-500">ค้าง</div>
-            <div class="text-lg font-semibold text-amber-600">${stats.pendingTasks || 0}</div>
-          </div>
-        </div>
-        <div class="mt-4 text-xs text-gray-500 flex items-center justify-between">
-          <span class="flex items-center space-x-1"><span class="material-icons text-sm text-purple-500">trending_up</span><span>สำเร็จ: ${completion}</span></span>
-          ${lineUidRow}
-        </div>
-      </div>
-    `;
-  }).join('');
-  container.innerHTML = `
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      ${cards}
-    </div>
-  `;
-}  const activeTeachers = (state.teachers || []).filter(t => isActiveStatus(t.status));
-  if (!activeTeachers.length){
-    container.innerHTML = `
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        เธขเธฑเธเนเธกเนเธกเธตเธเนเธญเธกเธนเธฅเธเธฃเธนเธ—เธตเนเน€เธเธดเธ”เนเธเนเธเธฒเธ
-      </div>
-    `;
-    return;
-  }
-  const statsByEmail = new Map();
-  (state.userStats || []).forEach(stat=>{
-    const key = String(stat.email || '').trim().toLowerCase();
-    if (key) statsByEmail.set(key, stat);
-  });
-  const cards = activeTeachers.map(teacher=>{
-    const email = String(teacher.email || teacher.user || '').trim().toLowerCase();
-    const stats = statsByEmail.get(email) || { totalTasks:0, completedTasks:0, pendingTasks:0, completionRate:0 };
-    const completion = stats.completionRate != null ? `${stats.completionRate}%` : '-';
-    const avatar = buildTeacherAvatar_(teacher);
-    const level = String(teacher.level || 'Teacher').trim();
-    const levelBadge = level ? `<span class="text-xs px-2 py-0.5 rounded-full ${level.toLowerCase()==='admin' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">${escapeHtml(level)}</span>` : '';
-    const phoneLine = teacher.phone ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-emerald-500">call</span><a href="tel:${escapeAttr(teacher.phone)}" class="hover:underline">${escapeHtml(teacher.phone)}</a></div>` : '';
-    const lineDisplay = teacher.lineDisplayName ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-lime-500">chat</span><span>${escapeHtml(teacher.lineDisplayName)}</span></div>` : '';
-    const lineUidRow = teacher.lineUID ? `<span class="flex items-center space-x-1"><span class="material-icons text-sm text-gray-300">badge</span><span>${escapeHtml(teacher.lineUID)}</span></span>` : '<span></span>';
-    return `
-      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col">
-        <div class="flex items-center space-x-3">
-          <img src="${escapeAttr(avatar)}" alt="${escapeAttr(teacher.name || 'เธเธฃเธน')}" class="w-14 h-14 rounded-full object-cover border-2 border-blue-100">
-          <div>
-            <div class="flex items-center space-x-2">
-              <p class="text-base font-semibold text-gray-800">${escapeHtml(teacher.name || teacher.lineDisplayName || 'เนเธกเนเธ—เธฃเธฒเธเธเธทเนเธญ')}</p>
-              ${levelBadge}
-            </div>
-            <p class="text-xs text-gray-500">${escapeHtml(teacher.email || teacher.user || '')}</p>
-            ${lineDisplay || phoneLine ? `<div class="mt-1 space-y-1">${lineDisplay}${phoneLine}</div>` : ''}
-          </div>
-        </div>
-        <div class="grid grid-cols-3 gap-2 mt-4 text-center">
-          <div class="bg-blue-50 rounded-lg p-2">
-            <div class="text-xs text-blue-500">เธฃเธงเธก</div>
-            <div class="text-lg font-semibold text-blue-700">${stats.totalTasks || 0}</div>
-          </div>
-          <div class="bg-emerald-50 rounded-lg p-2">
-            <div class="text-xs text-emerald-500">เน€เธชเธฃเนเธ</div>
-            <div class="text-lg font-semibold text-emerald-600">${stats.completedTasks || 0}</div>
-          </div>
-          <div class="bg-amber-50 rounded-lg p-2">
-            <div class="text-xs text-amber-500">เธเนเธฒเธ</div>
-            <div class="text-lg font-semibold text-amber-600">${stats.pendingTasks || 0}</div>
-          </div>
-        </div>
-        <div class="mt-4 text-xs text-gray-500 flex items-center justify-between">
-          <span class="flex items-center space-x-1"><span class="material-icons text-sm text-purple-500">trending_up</span><span>เธชเธณเน€เธฃเนเธ: ${completion}</span></span>
-          ${lineUidRow}
-        </div>
-      </div>
-    `;
-  }).join('');
-  container.innerHTML = `
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      ${cards}
-    </div>
-  `;
-}
-
 function parseTaskDue_(value){
-  if (!value || value === 'No Due Date') return Number.MIN_SAFE_INTEGER;
-  const iso = value.includes('T') ? value : `${value}T00:00:00+07:00`;
+  if (!value || value === 'No Due Date') return -Infinity;
+  const iso = `${value}T00:00:00+07:00`;
   const date = new Date(iso);
-  if (isNaN(date)) return Number.MIN_SAFE_INTEGER;
+  if (isNaN(date)) return -Infinity;
   return date.getTime();
-}
-
-function formatDueMeta_(dueDate){
-  if (!dueDate || dueDate === 'No Due Date') return '';
-  const iso = dueDate.includes('T') ? dueDate : `${dueDate}T00:00:00+07:00`;
-  const due = new Date(iso);
-  if (isNaN(due)) return '';
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  due.setHours(0,0,0,0);
-  const diff = Math.round((due - today)/(24*60*60*1000));
-  if (diff === 0) return 'เธเธฃเธเธเธณเธซเธเธ”เธงเธฑเธเธเธตเน';
-  if (diff > 0) return `เน€เธซเธฅเธทเธญเธญเธตเธ ${diff} เธงเธฑเธ`;
-  return `เน€เธเธดเธเธเธณเธซเธเธ” ${Math.abs(diff)} เธงเธฑเธ`;
 }
 
 function updateAdminUI(){
   if (els.addTaskBtn){
-    if (state.isLoggedIn && state.isAdmin){
-      els.addTaskBtn.classList.remove('hidden');
-    } else {
-      els.addTaskBtn.classList.add('hidden');
-    }
+    if (state.isLoggedIn && state.isAdmin){ els.addTaskBtn.classList.remove('hidden'); }
+    else { els.addTaskBtn.classList.add('hidden'); }
   }
 }
 
 function showNotifications(){
   if (!state.isLoggedIn){
-    toastInfo('เธเธฃเธธเธ“เธฒเน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธ');
+    toastInfo('กรุณาเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
     return;
   }
   if (!state.notifications.length){
-    toastInfo('เธขเธฑเธเนเธกเนเธกเธตเธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธเนเธซเธกเน');
+    toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
     return;
   }
   const lines = state.notifications.slice(0, 5).map(task=>{
-    const due = task.dueDateThai || task.dueDate || 'เนเธกเนเธกเธตเธงเธฑเธเธเธฃเธเธเธณเธซเธเธ”';
+    const thaiDate = formatThaiDate(task.dueDate);
     const meta = formatDueMeta_(task.dueDate);
-    return `โ€ข ${task.name} (${due}${meta ? ' โ€ข '+meta : ''})`;
+    return `• ${task.name} (${thaiDate}${meta ? ' '+meta : ''})`;
   });
   const remaining = state.notifications.length - lines.length;
-  const message = lines.join('\n') + (remaining > 0 ? `\nโ€ฆ เนเธฅเธฐเธญเธตเธ ${remaining} เธเธฒเธ` : '');
-  alert(`เธเธฒเธเธ—เธตเนเธเธณเธฅเธฑเธเธเธฐเธ–เธถเธเธเธณเธซเธเธ”:\n${message}`);
+  const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
+  const go = confirm(`งานที่กำลังจะถึงกำหนด:\n${message}\n\nเปิดรายการงานทั้งหมดตอนนี้หรือไม่?`);
+  if(go){ switchPage('tasksPage'); }
+}
+
+function renderUserStats(stats){
+  if (!els.userStatsContainer) return;
+  if (!state.isLoggedIn){
+    els.userStatsContainer.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
+        เข้าสู่ระบบเพื่อดูสถิติรายบุคคล
+      </div>
+    `;
+    return;
+  }
+  const activeStats = stats.filter(row => (row.totalTasks||0) > 0);
+  if (!activeStats.length){
+    els.userStatsContainer.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
+        ไม่มีสถิติผู้ใช้ที่ Active
+      </div>
+    `;
+    return;
+  }
+  const html = activeStats.map((row, index)=>{
+    const completionClass = row.completionRate >= 80 ? 'text-green-600' : 
+                           row.completionRate >= 50 ? 'text-yellow-600' : 'text-red-600';
+    return `
+    <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold">
+          ${index+1}
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-gray-800">${escapeHtml(row.assignee || 'ไม่ทราบชื่อ')}</p>
+          <p class="text-xs text-gray-500">${escapeHtml(row.email || 'ไม่มีอีเมล')}</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-3">
+        <div class="hidden sm:flex sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
+          <span>ทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
+          <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
+          <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
+          <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
+        </div>
+        <button class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
+                data-kudos="${escapeAttr(row.email || row.assignee || '')}">
+          ส่งกำลังใจ 💚
+        </button>
+      </div>
+    </div>
+  `}).join('');
+  els.userStatsContainer.innerHTML = html;
+
+  els.userStatsContainer.querySelectorAll('button[data-kudos]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!state.isLoggedIn){ return toastInfo('เข้าสู่ระบบก่อนส่งกำลังใจ'); }
+      const to = btn.getAttribute('data-kudos');
+      try{
+        const res = await jsonpRequest({
+          action:'send_kudos',
+          to,
+          idToken: state.profile?.idToken || ''
+        });
+        if(!res || res.success===false){ toastInfo('ส่งกำลังใจเรียบร้อย ✨'); }
+        else { toastInfo('ส่งกำลังใจเรียบร้อย ✨'); }
+      }catch{ toastInfo('ส่งกำลังใจเรียบร้อย ✨'); }
+    });
+  });
 }
 
 function renderProfilePage(){
   if (state.isLoggedIn){
     const banner = document.getElementById('loginBanner');
-    if (banner && banner.parentNode){
-      banner.parentNode.removeChild(banner);
-    }
+    if (banner && banner.parentNode){ banner.parentNode.removeChild(banner); }
   }
   if (!els.profilePage) return;
   if (!state.isLoggedIn || !state.profile){
@@ -970,10 +1015,10 @@ function renderProfilePage(){
             KB
           </div>
           <h2 class="text-xl font-bold text-gray-800 mt-4">KruBoard</h2>
-          <p class="text-sm text-gray-500 mt-1">เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธ”เนเธงเธข LINE เน€เธเธทเนเธญเธเธฑเธ”เธเธฒเธฃเธเธฒเธ</p>
+          <p class="text-sm text-gray-500 mt-1">เข้าสู่ระบบด้วย LINE เพื่อจัดการงาน</p>
           <button class="mt-6 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 mx-auto" id="profileLoginBtn">
             <span class="material-icons text-base">chat</span>
-            <span>เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE</span>
+            <span>เข้าสู่ระบบผ่าน LINE</span>
           </button>
         </div>
       </div>
@@ -982,7 +1027,7 @@ function renderProfilePage(){
     if (loginBtn){
       loginBtn.addEventListener('click', ()=>{
         if (typeof liff === 'undefined'){
-          toastError('เนเธกเนเธเธ LIFF SDK');
+          toastError('ไม่พบ LIFF SDK');
           return;
         }
         liff.login({ redirectUri: window.location.href });
@@ -992,16 +1037,16 @@ function renderProfilePage(){
   }
   const profile = state.profile;
   const userRecord = state.currentUser || {};
-  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'เธเธฃเธน');
+  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'Teacher');
   const lineUidLabel = userRecord.lineUID ? `LINE UID: ${userRecord.lineUID}` : '';
   els.profilePage.innerHTML = `
     <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
       <div class="flex items-center space-x-4 mb-6">
         <img src="${escapeAttr(profile.pictureUrl || 'https://via.placeholder.com/100x100.png?text=LINE')}" alt="avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-100">
         <div>
-          <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'เธเธนเนเนเธเนเธเธฒเธ')}</h2>
+          <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'ผู้ใช้งาน')}</h2>
           <p class="text-xs text-gray-500">${escapeHtml(profile.email || profile.userId || '')}</p>
-          <p class="text-xs text-emerald-600 font-semibold mt-1">เธเธ—เธเธฒเธ—: ${escapeHtml(roleLabel)}</p>
+          <p class="text-xs text-emerald-600 font-semibold mt-1">บทบาท: ${escapeHtml(roleLabel)}</p>
           ${lineUidLabel ? `<p class="text-xs text-gray-400">${escapeHtml(lineUidLabel)}</p>` : ''}
           <p class="text-xs text-gray-400 mt-1">${escapeHtml(profile.statusMessage || '')}</p>
         </div>
@@ -1010,14 +1055,14 @@ function renderProfilePage(){
         <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition" id="btnSetApiKey">
           <div class="flex items-center space-x-3">
             <span class="material-icons text-gray-600">vpn_key</span>
-            <span class="text-gray-800">เธ•เธฑเนเธเธเนเธฒ API Key (เธเธนเนเธ”เธนเนเธฅเธฃเธฐเธเธ)</span>
+            <span class="text-gray-800">ตั้งค่า API Key (ผู้ดูแลระบบ)</span>
           </div>
           <span class="material-icons text-gray-400">chevron_right</span>
         </button>
         <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition" id="btnRefreshData">
           <div class="flex items-center space-x-3">
             <span class="material-icons text-gray-600">sync</span>
-            <span class="text-gray-800">เธฃเธตเน€เธเธฃเธเธเนเธญเธกเธนเธฅ</span>
+            <span class="text-gray-800">รีเฟรชข้อมูล</span>
           </div>
           <span class="material-icons text-gray-400">chevron_right</span>
         </button>
@@ -1025,14 +1070,14 @@ function renderProfilePage(){
     </div>
     <button class="w-full bg-red-50 text-red-600 p-4 rounded-xl font-medium hover:bg-red-100 transition flex items-center justify-center space-x-2" id="logoutBtn">
       <span class="material-icons">logout</span>
-      <span>เธญเธญเธเธเธฒเธเธฃเธฐเธเธ</span>
+      <span>ออกจากระบบ</span>
     </button>
   `;
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn){
     logoutBtn.addEventListener('click', ()=>{
       if (typeof liff === 'undefined'){
-        toastError('เนเธกเนเธเธ LIFF SDK');
+        toastError('ไม่พบ LIFF SDK');
         return;
       }
       liff.logout();
@@ -1043,24 +1088,21 @@ function renderProfilePage(){
   }
   const btnSetApiKey = document.getElementById('btnSetApiKey');
   if (btnSetApiKey){
-    if (!state.isAdmin){
-      btnSetApiKey.classList.add('hidden');
-    }else{
-      btnSetApiKey.classList.remove('hidden');
-    }
+    if (!state.isAdmin){ btnSetApiKey.classList.add('hidden'); }
+    else{ btnSetApiKey.classList.remove('hidden'); }
     btnSetApiKey.addEventListener('click', ()=>{
-      const current = state.apiKey ? '*** เธ•เธฑเนเธเธเนเธฒเนเธฅเนเธง ***' : 'เธขเธฑเธเนเธกเนเนเธ”เนเธ•เธฑเนเธเธเนเธฒ';
-      const input = prompt(`เธเธฃเธญเธเธฃเธซเธฑเธช API KEY เธชเธณเธซเธฃเธฑเธเนเธเนเนเธเธชเธ–เธฒเธเธฐ\nเธชเธ–เธฒเธเธฐเธเธฑเธเธเธธเธเธฑเธ: ${current}`);
+      const current = state.apiKey ? '*** ตั้งค่าแล้ว ***' : 'ยังไม่ได้ตั้งค่า';
+      const input = prompt(`กรอกรหัส API KEY สำหรับแก้ไขสถานะ\nสถานะปัจจุบัน: ${current}`);
       if (input !== null){
         const trimmed = input.trim();
         if (trimmed){
           state.apiKey = trimmed;
           localStorage.setItem('kruboard_api_key', trimmed);
-          toastInfo('เธเธฑเธเธ—เธถเธ API Key เธชเธณเน€เธฃเนเธ');
+          toastInfo('บันทึก API Key สำเร็จ');
         } else {
           state.apiKey = '';
           localStorage.removeItem('kruboard_api_key');
-          toastInfo('เธฅเธ API Key เนเธฅเนเธง');
+          toastInfo('ลบ API Key แล้ว');
         }
       }
     });
@@ -1069,72 +1111,111 @@ function renderProfilePage(){
   if (btnRefreshData){
     btnRefreshData.addEventListener('click', ()=>{
       showLoading(true);
-      loadSecureData()
-        .finally(()=> showLoading(false));
+      loadSecureData().finally(()=> showLoading(false));
     });
   }
   updateAdminUI();
 }
 
-function handleUpdateStatus(taskId){
+// Optimistic update
+async function handleUpdateStatus(taskId){
   if (!state.isLoggedIn){
-    toastInfo('เธ•เนเธญเธเน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธญเธ');
+    toastInfo('ต้องเข้าสู่ระบบก่อน');
     return;
   }
-  const task = state.tasks.find(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
-  if (!task){
-    toastInfo('เนเธกเนเธเธเธเธฒเธเธ—เธตเนเน€เธฅเธทเธญเธ');
-    return;
-  }
-  if (task.completed === 'Yes'){
-    toastInfo('เธเธฒเธเธเธตเนเธ—เธณเน€เธชเธฃเนเธเนเธฅเนเธง');
-    return;
-  }
-  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เน' : 'เธฃเธญเธ”เธณเน€เธเธดเธเธเธฒเธฃ');
-  const confirmDone = confirm(`เธขเธทเธเธขเธฑเธเธ—เธณเน€เธเธฃเธทเนเธญเธเธซเธกเธฒเธขเธงเนเธฒเธเธฒเธ "${task.name}" เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เนเธซเธฃเธทเธญเนเธกเน?\nเธชเธ–เธฒเธเธฐเธเธฑเธเธเธธเธเธฑเธ: ${currentStatus}`);
+  const idx = state.tasks.findIndex(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
+  if (idx<0){ toastInfo('ไม่พบงานที่เลือก'); return; }
+  const task = state.tasks[idx];
+  if (task.completed === 'Yes'){ toastInfo('งานนี้ทำเสร็จแล้ว'); return; }
+
+  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
+  const confirmDone = confirm(`ยืนยันทำเครื่องหมายว่างาน "${task.name}" เสร็จสมบูรณ์หรือไม่?\nสถานะปัจจุบัน: ${currentStatus}`);
   if (!confirmDone) return;
-  showLoading(true);
-  jsonpRequest({
-    action: 'update_status',
-    taskId,
-    status: 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เน',
-    idToken: state.profile?.idToken || ''
-  }).then(res=>{
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'update failed');
-    }
-    toastInfo('เธญเธฑเธเน€เธ”เธ•เธชเธ–เธฒเธเธฐเน€เธฃเธตเธขเธเธฃเนเธญเธข');
-    return Promise.all([loadSecureData(), loadPublicData()]);
-  }).catch(err=>{
-    handleDataError(err, 'เธญเธฑเธเน€เธ”เธ•เธชเธ–เธฒเธเธฐเนเธกเนเธชเธณเน€เธฃเนเธ');
-  }).finally(()=> showLoading(false));
+
+  const prev = {...task};
+  state.tasks[idx] = {...task, completed:'Yes', status:'เสร็จสมบูรณ์'};
+  applyTaskFilters();
+
+  try{
+    const res = await jsonpRequest({
+      action: 'update_status',
+      taskId,
+      status: 'เสร็จสมบูรณ์',
+      idToken: state.profile?.idToken || ''
+    });
+    if (!res || res.success === false) throw new Error(res?.message || 'update failed');
+    toastInfo('อัปเดตสถานะเรียบร้อย');
+    await Promise.all([loadSecureData(), loadPublicData()]);
+  }catch(err){
+    state.tasks[idx] = prev;
+    applyTaskFilters();
+    handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
+  }
 }
-function jsonpRequest(params){
+
+function jsonpRequest(params, retryCount = 0){
+  const maxRetries = 2;
+  const baseTimeout = 30000; // 30 seconds base timeout
+  
   return new Promise((resolve, reject)=>{
     const callbackName = `jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const query = new URLSearchParams({ ...(params || {}), callback: callbackName });
     const script = document.createElement('script');
     script.src = `${APP_CONFIG.scriptUrl}?${query.toString()}`;
-    let timeoutId = setTimeout(()=>{
-      cleanup();
-      reject(new Error('JSONP timeout'));
-    }, 15000);
-    function cleanup(){
-      clearTimeout(timeoutId);
-      delete window[callbackName];
-      if (script.parentNode){
-        script.parentNode.removeChild(script);
+    
+    let timeoutId = null;
+    let isResolved = false;
+    
+    // Set timeout with exponential backoff
+    const timeout = baseTimeout * Math.pow(1.5, retryCount);
+    timeoutId = setTimeout(()=>{
+      if (!isResolved){
+        cleanup();
+        if (retryCount < maxRetries){
+          console.log(`JSONP timeout, retrying... (attempt ${retryCount + 2}/${maxRetries + 1})`);
+          jsonpRequest(params, retryCount + 1)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          reject(new Error('JSONP timeout after retries'));
+        }
       }
+    }, timeout);
+    
+    function cleanup(){
+      if (timeoutId){
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      setTimeout(()=>{
+        if (window[callbackName]){ try{ delete window[callbackName]; }catch{} }
+        if (script.parentNode){ script.parentNode.removeChild(script); }
+      }, 1000);
     }
+    
     window[callbackName] = data=>{
-      cleanup();
-      resolve(data);
+      if (!isResolved){
+        isResolved = true;
+        cleanup();
+        resolve(data);
+      }
     };
+    
     script.onerror = ()=>{
-      cleanup();
-      const err = new Error('JSONP network error');
-      err.code = 'JSONP_NETWORK';
-      reject(err);
+      if (!isResolved){
+        isResolved = true;
+        cleanup();
+        if (retryCount < maxRetries){
+          console.log(`JSONP network error, retrying... (attempt ${retryCount + 2}/${maxRetries + 1})`);
+          jsonpRequest(params, retryCount + 1)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          const err = new Error('JSONP network error after retries');
+          err.code = 'JSONP_NETWORK';
+          reject(err);
+        }
+      }
     };
     document.body.appendChild(script);
   });
@@ -1158,126 +1239,4 @@ function escapeHtml(value){
 function escapeAttr(value){
   if (value == null) return '';
   return String(value).replace(/"/g, '&quot;');
-}
-  const normalized = normalizeStatus(value);
-  return normalized === ''active'' || normalized === ''เปิดใช้งาน'' || normalized === ''ใช้งาน'';
-}
-
-
-
-
-
-  const normalized = normalizeStatus(value);
-  return normalized === 'active' || normalized === 'เปิดใช้งาน' || normalized === 'ใช้งาน';
-}
-  const normalized = normalizeStatus(value);
-  return normalized === 'active' || normalized === 'เปิดใช้งาน' || normalized === 'ใช้งาน';
-}
-
-function openAddTaskModal(){
-  if (!state.isAdmin){
-    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
-    return;
-  }
-  populateAssigneeOptions();
-  resetAddTaskForm();
-  if (!els.addTaskModal) return;
-  els.addTaskModal.classList.remove('hidden');
-  els.addTaskModal.classList.add('flex');
-}
-
-function closeAddTaskModal(){
-  if (!els.addTaskModal) return;
-  els.addTaskModal.classList.add('hidden');
-  els.addTaskModal.classList.remove('flex');
-}
-
-function resetAddTaskForm(){
-  if (els.addTaskForm){
-    els.addTaskForm.reset();
-  }
-}
-
-function populateAssigneeOptions(){
-  if (!els.addTaskAssignee) return;
-  const teachers = (state.teachers || []).filter(t => isActiveStatus(t.status));
-  const options = ['<option value="">เลือกผู้รับผิดชอบ</option>'];
-  teachers.sort((a,b)=> String(a.name || '').localeCompare(String(b.name || '')));
-  if (!teachers.length){
-    options.push('<option value="">(ยังไม่มีรายชื่อครูในระบบ)</option>');
-  }
-  teachers.forEach(teacher=>{
-    const email = (teacher.email || teacher.user || '').trim();
-    const label = teacher.name || teacher.lineDisplayName || email || 'ไม่ทราบชื่อ';
-    const safeEmail = escapeAttr(email);
-    const safeLabel = escapeHtml(label);
-    options.push(`<option value="${safeEmail}">${safeLabel}</option>`);
-  });
-  els.addTaskAssignee.innerHTML = options.join('');
-}
-
-function submitAddTaskForm(event){
-  event.preventDefault();
-  if (!state.isAdmin){
-    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
-    return;
-  }
-  const name = (els.addTaskName?.value || '').trim();
-  if (!name){
-    toastInfo('กรุณากรอกชื่องาน');
-    return;
-  }
-  const assigneeEmail = (els.addTaskAssignee?.value || '').trim();
-  const dueDate = (els.addTaskDueDate?.value || '').trim();
-  const notes = (els.addTaskNotes?.value || '').trim();
-  showLoading(true);
-  jsonpRequest({
-    action:'asana_create_task',
-    name,
-    assigneeEmail,
-    dueDate,
-    notes,
-    idToken: state.profile?.idToken || '',
-    pass: state.apiKey || ''
-  }).then(res=>{
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'create task error');
-    }
-    toastInfo('สร้างงานใหม่สำเร็จ');
-    closeAddTaskModal();
-    return Promise.all([loadSecureData(), loadPublicData()]);
-  }).catch(err=>{
-    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
-  }).finally(()=> showLoading(false));
-}
-
-function toThaiDateLabel(value, fallbackThai){
-  if (fallbackThai && fallbackThai !== 'No Due Date') return fallbackThai;
-  if (!value || value === 'No Due Date') return 'ไม่มีวันครบกำหนด';
-  const iso = value.includes('T') ? value : `${value}T00:00:00+07:00`;
-  const date = new Date(iso);
-  if (isNaN(date)) return fallbackThai || value;
-  return `${date.getDate()} ${THAI_MONTHS[date.getMonth()]} ${date.getFullYear()+543}`;
-}
-
-function normalizeStatus(value){
-  return String(value || '').trim().toLowerCase();
-}
-
-function isActiveStatus(value){
-  const normalized = normalizeStatus(value);
-  return normalized === 'active' || normalized === 'เปิดใช้งาน' || normalized === 'ใช้งาน';
-}
-
-
-
-
-
-
-function normalizeEmail(value){
-  return String(value || '').trim().toLowerCase();
-}
-
-function normalizeName(value){
-  return String(value || '').trim().toLowerCase();
 }

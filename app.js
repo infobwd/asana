@@ -1,4 +1,4 @@
-/* KruBoard front-end (GitHub hosted) */
+/* KruBoard front-end (GitHub hosted) - Updated Version */
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
   liffId: '2006490627-3NpRPl0G'
@@ -20,6 +20,12 @@ const state = {
   isAdmin: false,
   apiKey: localStorage.getItem('kruboard_api_key') || ''
 };
+
+// Thai months for date formatting
+const THAI_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+];
 
 const els = {
   navItems: [],
@@ -65,7 +71,18 @@ const els = {
   taskPaginationNext: document.getElementById('taskPaginationNext'),
   taskPaginationInfo: document.getElementById('taskPaginationInfo'),
   taskPaginationWrapper: document.getElementById('taskPagination'),
-  addTaskBtn: document.getElementById('addTaskBtn')
+  addTaskBtn: document.getElementById('addTaskBtn'),
+  // Modal elements
+  taskModal: null,
+  modalLoading: null,
+  taskForm: null,
+  closeModalBtn: null,
+  cancelModalBtn: null,
+  submitTaskBtn: null,
+  taskNameInput: null,
+  taskAssigneeInput: null,
+  taskDueDateInput: null,
+  taskNotesInput: null
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -73,6 +90,7 @@ document.addEventListener('DOMContentLoaded', init);
 function init(){
   cachePages();
   bindUI();
+  initModalElements();
   showLoading(true);
   initializeLiff()
     .catch(err=>{
@@ -89,6 +107,157 @@ function init(){
         .finally(()=> showLoading(false));
     });
 }
+
+function initModalElements(){
+  els.taskModal = document.getElementById('taskModal');
+  els.modalLoading = document.getElementById('modalLoading');
+  els.taskForm = document.getElementById('taskForm');
+  els.closeModalBtn = document.getElementById('closeModalBtn');
+  els.cancelModalBtn = document.getElementById('cancelModalBtn');
+  els.submitTaskBtn = document.getElementById('submitTaskBtn');
+  els.taskNameInput = document.getElementById('taskName');
+  els.taskAssigneeInput = document.getElementById('taskAssignee');
+  els.taskDueDateInput = document.getElementById('taskDueDate');
+  els.taskNotesInput = document.getElementById('taskNotes');
+  
+  // Bind modal events
+  if (els.closeModalBtn){
+    els.closeModalBtn.addEventListener('click', closeTaskModal);
+  }
+  if (els.cancelModalBtn){
+    els.cancelModalBtn.addEventListener('click', closeTaskModal);
+  }
+  if (els.taskForm){
+    els.taskForm.addEventListener('submit', handleTaskFormSubmit);
+  }
+  // Close modal on outside click
+  if (els.taskModal){
+    els.taskModal.addEventListener('click', (evt)=>{
+      if (evt.target === els.taskModal){
+        closeTaskModal();
+      }
+    });
+  }
+}
+
+function openTaskModal(){
+  if (!els.taskModal) return;
+  els.taskModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  // Reset form
+  if (els.taskForm){
+    els.taskForm.reset();
+  }
+  // Set today as minimum date
+  if (els.taskDueDateInput){
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
+  }
+}
+
+function closeTaskModal(){
+  if (els.taskModal){
+    els.taskModal.classList.add('hidden');
+  }
+  document.body.style.overflow = '';
+}
+
+function showModalLoading(show){
+  if (els.modalLoading){
+    els.modalLoading.classList.toggle('hidden', !show);
+  }
+}
+
+async function handleTaskFormSubmit(evt){
+  evt.preventDefault();
+  
+  if (!state.isLoggedIn){
+    toastInfo('กรุณาเข้าสู่ระบบก่อน');
+    return;
+  }
+  
+  if (!state.isAdmin){
+    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
+    return;
+  }
+  
+  const name = (els.taskNameInput?.value || '').trim();
+  const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
+  const dueDate = (els.taskDueDateInput?.value || '').trim();
+  const notes = (els.taskNotesInput?.value || '').trim();
+  
+  if (!name){
+    toastInfo('กรุณากรอกชื่องาน');
+    return;
+  }
+  
+  showModalLoading(true);
+  closeTaskModal();
+  
+  try{
+    const res = await jsonpRequest({
+      action:'asana_create_task',
+      name,
+      assigneeEmail,
+      dueDate,
+      notes,
+      idToken: state.profile?.idToken || '',
+      pass: state.apiKey || ''
+    });
+    
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'create task error');
+    }
+    
+    toastInfo('สร้างงานใหม่สำเร็จ');
+    await Promise.all([loadSecureData(), loadPublicData()]);
+  }catch(err){
+    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
+  }finally{
+    showModalLoading(false);
+  }
+}
+
+function formatThaiDate(dateString){
+  if (!dateString || dateString === 'No Due Date') return 'ไม่มีวันครบกำหนด';
+  
+  let date;
+  if (dateString instanceof Date){
+    date = dateString;
+  } else {
+    date = new Date(dateString + 'T00:00:00+07:00');
+  }
+  
+  if (isNaN(date)) return dateString;
+  
+  const day = date.getDate();
+  const month = THAI_MONTHS[date.getMonth()];
+  const year = date.getFullYear() + 543;
+  
+  return `${day} ${month} ${year}`;
+}
+
+function formatDueMeta_(dueDate){
+  if (!dueDate || dueDate === 'No Due Date') return '';
+  const iso = `${dueDate}T00:00:00+07:00`;
+  const due = new Date(iso);
+  if (isNaN(due)) return '';
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  due.setHours(0,0,0,0);
+  const diff = Math.round((due - today)/(24*60*60*1000));
+  
+  if (diff === 0) return '(ครบกำหนดวันนี้)';
+  if (diff === 1) return '(พรุ่งนี้)';
+  if (diff === -1) return '(เมื่อวาน)';
+  if (diff > 0) return `(อีก ${diff} วัน)`;
+  return `(เกินกำหนด ${Math.abs(diff)} วัน)`;
+}
+
+// Other functions remain the same until we get to specific ones that need updating...
 
 function cachePages(){
   const pages = Array.from(document.querySelectorAll('.page'));
@@ -199,10 +368,11 @@ function bindUI(){
   }
 
   if (els.addTaskBtn){
-    els.addTaskBtn.addEventListener('click', promptCreateTask);
+    els.addTaskBtn.addEventListener('click', openTaskModal);
   }
 }
 
+// Rest of the utility functions (remain the same)
 function ensureLiffSdk(){
   if (typeof liff !== 'undefined') return Promise.resolve();
   if (document.getElementById('liff-sdk')){
@@ -504,6 +674,7 @@ function renderUpcomingTasks(list){
     return;
   }
   const html = list.map(task=>{
+    const thaiDate = formatThaiDate(task.dueDate);
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
@@ -516,7 +687,7 @@ function renderUpcomingTasks(list){
         <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(task.dueDateThai || task.dueDate || '')}</span>
+            <span>${escapeHtml(thaiDate)}</span>
           </span>
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-green-500">flag</span>
@@ -576,11 +747,13 @@ function applyTaskFilters(){
     return haystack.some(text => text.includes(search));
   });
 
+  // Sort tasks from newest to oldest (reverse chronological)
   filtered.sort((a,b)=>{
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
-    if (da === db) return String(a.name || '').localeCompare(String(b.name || ''));
-    return da - db;
+    // Reverse order for newest first
+    if (db === da) return String(a.name || '').localeCompare(String(b.name || ''));
+    return db - da;
   });
 
   state.filteredTasks = filtered;
@@ -618,7 +791,7 @@ function renderTaskList(){
     const isCompleted = task.completed === 'Yes';
     const statusLabel = task.status || (isCompleted ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
     const statusClass = isCompleted ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600';
-    const dueDisplay = task.dueDate === 'No Due Date' ? 'ไม่มีวันครบกำหนด' : (task.dueDateThai || task.dueDate);
+    const thaiDate = formatThaiDate(task.dueDate);
     const dueMeta = formatDueMeta_(task.dueDate);
     const buttonClass = isCompleted
       ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
@@ -639,7 +812,7 @@ function renderTaskList(){
         <div class="mt-3 text-sm text-gray-600 space-y-1">
           <div class="flex items-center space-x-2">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(dueDisplay)}</span>
+            <span>${escapeHtml(thaiDate)}</span>
             <span class="text-xs text-gray-400">${escapeHtml(dueMeta)}</span>
           </div>
           <div class="flex items-center space-x-2 text-xs text-gray-500">
@@ -678,25 +851,11 @@ function renderTaskPagination(){
 }
 
 function parseTaskDue_(value){
-  if (!value || value === 'No Due Date') return Number.MAX_SAFE_INTEGER;
+  if (!value || value === 'No Due Date') return 0; // Changed to 0 for reverse sorting
   const iso = `${value}T00:00:00+07:00`;
   const date = new Date(iso);
-  if (isNaN(date)) return Number.MAX_SAFE_INTEGER;
+  if (isNaN(date)) return 0;
   return date.getTime();
-}
-
-function formatDueMeta_(dueDate){
-  if (!dueDate || dueDate === 'No Due Date') return '';
-  const iso = `${dueDate}T00:00:00+07:00`;
-  const due = new Date(iso);
-  if (isNaN(due)) return '';
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  due.setHours(0,0,0,0);
-  const diff = Math.round((due - today)/(24*60*60*1000));
-  if (diff === 0) return 'ครบกำหนดวันนี้';
-  if (diff > 0) return `เหลืออีก ${diff} วัน`;
-  return `เกินกำหนด ${Math.abs(diff)} วัน`;
 }
 
 function updateAdminUI(){
@@ -719,47 +878,13 @@ function showNotifications(){
     return;
   }
   const lines = state.notifications.slice(0, 5).map(task=>{
-    const due = task.dueDateThai || task.dueDate || 'ไม่มีวันครบกำหนด';
+    const thaiDate = formatThaiDate(task.dueDate);
     const meta = formatDueMeta_(task.dueDate);
-    return `• ${task.name} (${due}${meta ? ' • '+meta : ''})`;
+    return `• ${task.name} (${thaiDate}${meta ? ' '+meta : ''})`;
   });
   const remaining = state.notifications.length - lines.length;
   const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
   alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
-}
-
-function promptCreateTask(){
-  if (!state.isLoggedIn){
-    toastInfo('กรุณาเข้าสู่ระบบก่อน');
-    return;
-  }
-  if (!state.isAdmin){
-    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
-    return;
-  }
-  const name = prompt('ชื่อหัวข้องานใหม่');
-  if (!name) return;
-  const assigneeEmail = (prompt('อีเมลผู้รับผิดชอบ (ถ้าไม่มีให้เว้นว่าง)') || '').trim();
-  const dueDate = (prompt('กำหนดส่ง (YYYY-MM-DD) หรือเว้นว่าง') || '').trim();
-  const notes = (prompt('รายละเอียดงาน (ไม่บังคับ)') || '').trim();
-  showLoading(true);
-  jsonpRequest({
-    action:'asana_create_task',
-    name,
-    assigneeEmail,
-    dueDate,
-    notes,
-    idToken: state.profile?.idToken || '',
-    pass: state.apiKey || ''
-  }).then(res=>{
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'create task error');
-    }
-    toastInfo('สร้างงานใหม่สำเร็จ');
-    return Promise.all([loadSecureData(), loadPublicData()]);
-  }).catch(err=>{
-    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
-  }).finally(()=> showLoading(false));
 }
 
 function renderUserStats(stats){
@@ -772,31 +897,42 @@ function renderUserStats(stats){
     `;
     return;
   }
-  if (!stats.length){
+  // Filter only Active users if available
+  const activeStats = stats.filter(row => {
+    // Check if user has tasks (active users will have tasks)
+    return row.totalTasks > 0;
+  });
+  
+  if (!activeStats.length){
     els.userStatsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ไม่มีสถิติผู้ใช้
+        ไม่มีสถิติผู้ใช้ที่ Active
       </div>
     `;
     return;
   }
-  const html = stats.map((row, index)=>`
+  const html = activeStats.map((row, index)=>{
+    const completionClass = row.completionRate >= 80 ? 'text-green-600' : 
+                           row.completionRate >= 50 ? 'text-yellow-600' : 'text-red-600';
+    return `
     <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-semibold">${index+1}</div>
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold">
+          ${index+1}
+        </div>
         <div>
           <p class="text-sm font-semibold text-gray-800">${escapeHtml(row.assignee || 'ไม่ทราบชื่อ')}</p>
-          <p class="text-xs text-gray-500">${escapeHtml(row.email || '')}</p>
+          <p class="text-xs text-gray-500">${escapeHtml(row.email || 'ไม่มีอีเมล')}</p>
         </div>
       </div>
-      <div class="flex space-x-4 text-xs text-gray-600">
-        <span>รวม: <strong>${row.totalTasks || 0}</strong></span>
-        <span>เสร็จ: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
-        <span>ค้าง: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
-        <span>สำเร็จ: <strong class="text-blue-600">${row.completionRate || 0}%</strong></span>
+      <div class="flex flex-col sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
+        <span>งานทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
+        <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
+        <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
+        <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
       </div>
     </div>
-  `).join('');
+  `}).join('');
   els.userStatsContainer.innerHTML = html;
 }
 
@@ -838,7 +974,7 @@ function renderProfilePage(){
   }
   const profile = state.profile;
   const userRecord = state.currentUser || {};
-  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'ครู');
+  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'Teacher');
   const lineUidLabel = userRecord.lineUID ? `LINE UID: ${userRecord.lineUID}` : '';
   els.profilePage.innerHTML = `
     <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
@@ -955,6 +1091,7 @@ function handleUpdateStatus(taskId){
     handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
   }).finally(()=> showLoading(false));
 }
+
 function jsonpRequest(params){
   return new Promise((resolve, reject)=>{
     const callbackName = `jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;

@@ -172,7 +172,7 @@
         <div class="flex items-center space-x-2">
           <button id="notificationBtn" class="relative p-2 hover:bg-white/10 rounded-lg transition">
             <span class="material-icons">notifications</span>
-            <span class="notification-badge" id="notificationCount">3</span>
+            <span class="notification-badge" id="notificationCount">0</span>
           </button>
           <button id="refreshBtn" class="p-2 hover:bg-white/10 rounded-lg transition">
             <span class="material-icons">refresh</span>
@@ -197,6 +197,14 @@
         <div class="stat-badge flex-shrink-0">
           <span class="material-icons text-sm mr-1">check_circle</span>
           <span id="headerCompletionRate">0%</span>
+        </div>
+        <div class="stat-badge flex-shrink-0 bg-white/25 text-white">
+          <span class="material-icons text-sm mr-1">person</span>
+          <span id="headerMyTasks">0</span>
+        </div>
+        <div class="stat-badge flex-shrink-0 bg-white/25 text-white">
+          <span class="material-icons text-sm mr-1">notifications_active</span>
+          <span id="headerMyUpcoming">0</span>
         </div>
       </div>
     </div>
@@ -273,6 +281,47 @@
         </div>
       </section>
 
+      <section class="mb-6 hidden" id="personalStatsSection">
+        <h2 class="text-lg font-bold text-gray-800 mb-3 flex items-center">
+          <span class="material-icons text-amber-500 mr-2">insights</span>
+          สถิติของฉัน
+        </h2>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-white rounded-xl p-4 shadow-md border border-amber-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-amber-500 text-2xl">star</span>
+              <span class="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">เสร็จสิ้น</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myCompletedCount">0</div>
+            <div class="text-xs text-gray-500">งานที่ฉันทำเสร็จ</div>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-md border border-rose-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-rose-500 text-2xl">hourglass_bottom</span>
+              <span class="text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded-full">รอดำเนินการ</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myPendingCount">0</div>
+            <div class="text-xs text-gray-500">งานที่ยังต้องทำ</div>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-md border border-sky-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-sky-500 text-2xl">event_note</span>
+              <span class="text-xs bg-sky-100 text-sky-700 px-2 py-1 rounded-full">เดือนนี้</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myMonthTaskCount">0</div>
+            <div class="text-xs text-gray-500">งานที่กำหนดในเดือนนี้</div>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-md border border-emerald-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-emerald-500 text-2xl">alarm</span>
+              <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">ใกล้ครบกำหนด</span>
+            </div>
+            <div class="text-2xl font-bold text-gray-800" id="myUpcomingCount">0</div>
+            <div class="text-xs text-gray-500">งานที่จะถึงกำหนด</div>
+          </div>
+        </div>
+      </section>
+
       <!-- System Info -->
       <section class="mb-6">
         <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4">
@@ -281,7 +330,7 @@
             <div class="flex-1">
               <h3 class="font-semibold text-gray-800 mb-1">ระบบคำนวณภาระงาน</h3>
               <p class="text-sm text-gray-600 leading-relaxed">
-                งานสอน=1.8 | ประชุม=0.8 | ทั้งกรรม=12 | วิชาการ=2.0 | โครงการ=1.5 | ปรับระ=2.2
+                งานสอน=1.8 | ประชุม=0.8 | กิจกรรม=1.2 | วิชาการ=2.0 | โครงการ=1.5 | บริหาร=2.2
               </p>
             </div>
           </div>
@@ -292,15 +341,42 @@
     <!-- Tasks Page -->
     <div id="tasksPage" class="page px-4 py-4">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-bold text-gray-800">งานทั้งหมด</h2>
-        <button id="filterBtn" class="flex items-center space-x-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">
-          <span class="material-icons text-sm">filter_list</span>
-          <span>กรอง</span>
+        <h2 class="text-xl font-bold text-gray-800">งานของฉัน</h2>
+        <button id="addTaskBtn" class="hidden flex items-center space-x-1 bg-green-600 text-white px-3 py-2 rounded-lg text-sm shadow-sm hover:bg-green-700">
+          <span class="material-icons text-sm">add_task</span>
+          <span>เพิ่มงานใหม่</span>
         </button>
       </div>
-      
-      <div id="allTasksContainer" class="space-y-3">
-        <!-- Tasks will be loaded here -->
+
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-3 mb-4">
+        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div class="flex items-center bg-gray-100 px-3 py-2 rounded-lg flex-1">
+            <span class="material-icons text-gray-400 mr-2">search</span>
+            <input id="taskSearchInput" type="search" class="bg-transparent outline-none text-sm w-full" placeholder="ค้นหาด้วยชื่องาน ผู้รับผิดชอบ หรือคำสำคัญ">
+          </div>
+          <div class="flex items-center space-x-2">
+            <label for="taskStatusFilter" class="text-xs text-gray-500 uppercase tracking-wide">สถานะ</label>
+            <select id="taskStatusFilter" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="all">ทั้งหมด</option>
+              <option value="pending">รอดำเนินการ</option>
+              <option value="completed">เสร็จสมบูรณ์</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="allTasksContainer" class="space-y-3"></div>
+
+      <div class="flex items-center justify-between mt-4" id="taskPagination">
+        <button id="taskPaginationPrev" class="flex items-center space-x-1 px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span class="material-icons text-sm">chevron_left</span>
+          <span>ก่อนหน้า</span>
+        </button>
+        <span class="text-sm text-gray-600" id="taskPaginationInfo">หน้า 1/1</span>
+        <button id="taskPaginationNext" class="flex items-center space-x-1 px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+          <span>ถัดไป</span>
+          <span class="material-icons text-sm">chevron_right</span>
+        </button>
       </div>
     </div>
 

@@ -322,7 +322,10 @@ function loadSecureData(){
 }
 
 function fetchAllTasks(){
-  return jsonpRequest({ action:'tasks' })
+  return jsonpRequest({
+    action:'tasks',
+    idToken: state.profile?.idToken || ''
+  })
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'tasks error');
@@ -332,7 +335,10 @@ function fetchAllTasks(){
 }
 
 function fetchUserStats(){
-  return jsonpRequest({ action:'user_stats' })
+  return jsonpRequest({
+    action:'user_stats',
+    idToken: state.profile?.idToken || ''
+  })
     .then(res=>{
       if (!res || res.success === false){
         throw new Error(res?.message || 'user stats error');
@@ -622,7 +628,8 @@ function handleUpdateStatus(taskId){
     action: 'update_status',
     taskId,
     status: trimmed,
-    pass: state.apiKey
+    pass: state.apiKey,
+    idToken: state.profile?.idToken || ''
   }).then(res=>{
     if (!res || res.success === false){
       throw new Error(res?.message || 'update failed');

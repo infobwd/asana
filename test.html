@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KruBoard API Test</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Kanit', sans-serif; }
+    .loading { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-gray-100 p-4">
+  <div class="max-w-2xl mx-auto">
+    <div class="bg-white rounded-lg shadow p-6 mb-4">
+      <h1 class="text-2xl font-bold mb-4">ทดสอบการเชื่อมต่อ API</h1>
+      
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-2">Script URL:</label>
+        <input type="text" id="scriptUrl" class="w-full p-2 border rounded" 
+               value="https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-2">LINE ID Token (ไม่บังคับ):</label>
+        <textarea id="idToken" class="w-full p-2 border rounded" rows="3" placeholder="ปล่อยว่างสำหรับทดสอบ public endpoints"></textarea>
+      </div>
+
+      <div class="space-y-2">
+        <button onclick="testPing()" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded">
+          Test 1: Ping (ทดสอบการเชื่อมต่อ)
+        </button>
+        <button onclick="testDashboard()" class="w-full bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded">
+          Test 2: Dashboard (ข้อมูล public)
+        </button>
+        <button onclick="testUpcoming()" class="w-full bg-purple-500 hover:bg-purple-600 text-white py-2 px-4 rounded">
+          Test 3: Upcoming Tasks
+        </button>
+        <button onclick="testDirectFetch()" class="w-full bg-orange-500 hover:bg-orange-600 text-white py-2 px-4 rounded">
+          Test 4: Direct Fetch (No JSONP)
+        </button>
+      </div>
+
+      <div id="results" class="mt-6 p-4 bg-gray-50 rounded min-h-[200px]">
+        <p class="text-gray-500">ผลการทดสอบจะแสดงที่นี่...</p>
+      </div>
+    </div>
+
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+      <h3 class="font-bold mb-2">วิธีแก้ไขหาก API ไม่ตอบ:</h3>
+      <ol class="list-decimal list-inside space-y-1 text-sm">
+        <li>ตรวจสอบว่า Google Apps Script ถูก Deploy แบบ Web app แล้ว</li>
+        <li>Execute as: Me (อีเมลของคุณ)</li>
+        <li>Who has access: Anyone</li>
+        <li>กด Deploy > New deployment หากแก้ไขโค้ด</li>
+        <li>คัดลอก URL ใหม่หลัง deploy</li>
+        <li>รอ 1-2 นาทีหลัง deploy เพื่อให้ระบบอัพเดท</li>
+        <li>ตรวจสอบว่าไม่มี error ในหน้า Executions ของ Apps Script</li>
+      </ol>
+    </div>
+  </div>
+
+  <script>
+    const log = (msg, type = 'info') => {
+      const results = document.getElementById('results');
+      const time = new Date().toLocaleTimeString('th-TH');
+      const color = type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : 'text-gray-700';
+      results.innerHTML += `<div class="${color}"><strong>[${time}]</strong> ${msg}</div>`;
+    };
+
+    const clear = () => {
+      document.getElementById('results').innerHTML = '';
+    };
+
+    async function testPing() {
+      clear();
+      const url = document.getElementById('scriptUrl').value;
+      log('Testing ping endpoint...');
+      
+      try {
+        const start = Date.now();
+        const response = await jsonpRequest(url, { action: 'ping' });
+        const elapsed = Date.now() - start;
+        
+        if (response.success) {
+          log(`✅ Ping successful! (${elapsed}ms)`, 'success');
+          log(`Response: ${JSON.stringify(response)}`, 'success');
+        } else {
+          log(`❌ Ping failed: ${response.message}`, 'error');
+        }
+      } catch (err) {
+        log(`❌ Error: ${err.message}`, 'error');
+      }
+    }
+
+    async function testDashboard() {
+      clear();
+      const url = document.getElementById('scriptUrl').value;
+      const idToken = document.getElementById('idToken').value;
+      log('Testing dashboard endpoint...');
+      
+      try {
+        const params = { action: 'dashboard' };
+        if (idToken) params.idToken = idToken;
+        
+        const start = Date.now();
+        const response = await jsonpRequest(url, params);
+        const elapsed = Date.now() - start;
+        
+        if (response.success) {
+          log(`✅ Dashboard loaded! (${elapsed}ms)`, 'success');
+          log(`Total Tasks: ${response.data?.summary?.totalTasks || 0}`, 'success');
+          log(`Completed: ${response.data?.summary?.completedTasks || 0}`, 'success');
+          log(`Pending: ${response.data?.summary?.pendingTasks || 0}`, 'success');
+        } else {
+          log(`❌ Dashboard failed: ${response.message}`, 'error');
+        }
+      } catch (err) {
+        log(`❌ Error: ${err.message}`, 'error');
+      }
+    }
+
+    async function testUpcoming() {
+      clear();
+      const url = document.getElementById('scriptUrl').value;
+      const idToken = document.getElementById('idToken').value;
+      log('Testing upcoming tasks...');
+      
+      try {
+        const params = { action: 'upcoming', days: 7 };
+        if (idToken) {
+          params.idToken = idToken;
+          params.scope = 'mine';
+        }
+        
+        const start = Date.now();
+        const response = await jsonpRequest(url, params);
+        const elapsed = Date.now() - start;
+        
+        if (response.success) {
+          log(`✅ Upcoming tasks loaded! (${elapsed}ms)`, 'success');
+          log(`Found ${response.data?.length || 0} tasks`, 'success');
+          if (response.data?.length > 0) {
+            log(`First task: ${response.data[0].name}`, 'success');
+          }
+        } else {
+          log(`❌ Failed: ${response.message}`, 'error');
+        }
+      } catch (err) {
+        log(`❌ Error: ${err.message}`, 'error');
+      }
+    }
+
+    async function testDirectFetch() {
+      clear();
+      const url = document.getElementById('scriptUrl').value;
+      log('Testing direct fetch (no JSONP)...');
+      log('Note: This will likely fail due to CORS, but helps diagnose if the script is reachable');
+      
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(url + '?action=ping', {
+          method: 'GET',
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        log(`✅ Script is reachable! Status: ${response.status}`, 'success');
+        log('CORS error expected - this is normal', 'info');
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          log(`❌ Timeout - script not responding`, 'error');
+        } else if (err.message.includes('CORS')) {
+          log(`✅ Script is reachable but blocked by CORS (expected)`, 'success');
+        } else {
+          log(`❌ Cannot reach script: ${err.message}`, 'error');
+        }
+      }
+    }
+
+    function jsonpRequest(url, params) {
+      return new Promise((resolve, reject) => {
+        const callbackName = `jsonp_${Date.now()}`;
+        const query = new URLSearchParams({ ...params, callback: callbackName });
+        const script = document.createElement('script');
+        script.src = `${url}?${query}`;
+        
+        let timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error('Request timeout (30s)'));
+        }, 30000);
+        
+        function cleanup() {
+          clearTimeout(timeoutId);
+          delete window[callbackName];
+          if (script.parentNode) {
+            script.parentNode.removeChild(script);
+          }
+        }
+        
+        window[callbackName] = (data) => {
+          cleanup();
+          resolve(data);
+        };
+        
+        script.onerror = () => {
+          cleanup();
+          reject(new Error('Script loading error'));
+        };
+        
+        document.body.appendChild(script);
+      });
+    }
+  </script>
+</body>
+</html>

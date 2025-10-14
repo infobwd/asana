@@ -52,13 +52,19 @@ function init(){
   bindUI();
   showLoading(true);
   initializeLiff()
-    .then(loadPublicData)
-    .then(()=> state.isLoggedIn ? loadSecureData() : null)
     .catch(err=>{
-      console.error('Init error:', err);
-      toastError('โหลดข้อมูลล้มเหลว กรุณาลองใหม่');
+      console.error('LIFF init failed:', err);
+      renderLoginBanner();
+      renderProfilePage();
     })
-    .finally(()=> showLoading(false));
+    .finally(()=>{
+      loadPublicData()
+        .then(()=> state.isLoggedIn ? loadSecureData() : null)
+        .catch(err=>{
+          handleDataError(err, 'โหลดข้อมูลล้มเหลว กรุณาลองใหม่');
+        })
+        .finally(()=> showLoading(false));
+    });
 }
 
 function cachePages(){
@@ -136,12 +142,45 @@ function bindUI(){
   }
 }
 
+function ensureLiffSdk(){
+  if (typeof liff !== 'undefined') return Promise.resolve();
+  if (document.getElementById('liff-sdk')){
+    return waitForLiffInstance(3000);
+  }
+  return new Promise((resolve, reject)=>{
+    const script = document.createElement('script');
+    script.id = 'liff-sdk';
+    script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
+    script.async = true;
+    script.onload = ()=> waitForLiffInstance(0).then(resolve).catch(reject);
+    script.onerror = ()=> reject(new Error('โหลด LIFF SDK ไม่สำเร็จ'));
+    document.head.appendChild(script);
+  });
+}
+
+function waitForLiffInstance(timeoutMs){
+  const deadline = Date.now() + (timeoutMs || 0);
+  return new Promise((resolve, reject)=>{
+    (function poll(){
+      if (typeof liff !== 'undefined'){
+        resolve();
+        return;
+      }
+      if (Date.now() > deadline){
+        reject(new Error('LIFF SDK not available'));
+        return;
+      }
+      setTimeout(poll, 100);
+    })();
+  });
+}
+
 async function initializeLiff(){
-  if (typeof liff === 'undefined'){
-    console.warn('LIFF SDK not loaded. Login disabled.');
-    renderLoginBanner();
-    renderProfilePage();
-    return;
+  try{
+    await ensureLiffSdk();
+  }catch(err){
+    console.warn('LIFF SDK not loaded. Login disabled.', err);
+    throw err;
   }
   try{
     await liff.init({ liffId: APP_CONFIG.liffId });
@@ -164,8 +203,7 @@ async function initializeLiff(){
     renderProfilePage();
   }catch(err){
     console.error('LIFF init error:', err);
-    renderLoginBanner();
-    renderProfilePage();
+    throw err;
   }
 }
 
@@ -227,6 +265,15 @@ function toastInfo(message){
   alert(message);
 }
 
+function handleDataError(err, fallbackMessage){
+  console.error('Data error:', err);
+  if (err?.code === 'JSONP_NETWORK'){
+    toastError('ไม่สามารถเชื่อมต่อ Apps Script ได้ โปรดตรวจสอบว่าเว็บแอปเผยแพร่แบบ Anyone และ URL ถูกต้อง');
+  } else {
+    toastError(fallbackMessage);
+  }
+}
+
 async function loadPublicData(){
   const [dashboard] = await Promise.all([fetchDashboardStats(), loadUpcomingTasks()]);
   state.dashboard = dashboard;
@@ -270,8 +317,7 @@ function loadSecureData(){
     renderTasks(tasks);
     renderUserStats(stats);
   }).catch(err=>{
-    console.error('Secure data error:', err);
-    toastError('ไม่สามารถโหลดข้อมูลแบบละเอียดได้');
+    handleDataError(err, 'ไม่สามารถโหลดข้อมูลแบบละเอียดได้');
   });
 }
 
@@ -584,8 +630,7 @@ function handleUpdateStatus(taskId){
     toastInfo('อัปเดตสถานะเรียบร้อย');
     return loadSecureData();
   }).catch(err=>{
-    console.error('Update status error:', err);
-    toastError('อัปเดตสถานะไม่สำเร็จ');
+    handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
   }).finally(()=> showLoading(false));
 }
 
@@ -612,7 +657,9 @@ function jsonpRequest(params){
     };
     script.onerror = ()=>{
       cleanup();
-      reject(new Error('JSONP network error'));
+      const err = new Error('JSONP network error');
+      err.code = 'JSONP_NETWORK';
+      reject(err);
     };
     document.body.appendChild(script);
   });

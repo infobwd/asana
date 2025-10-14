@@ -2,7 +2,9 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <title>KruBoard - กระดานรวมงานคุณครู</title>
   
   <!-- Tailwind CSS -->
@@ -21,34 +23,67 @@
       font-family: 'Kanit', sans-serif;
     }
     
+    body {
+      padding-bottom: 80px; /* Space for bottom nav */
+    }
+    
     .task-card {
       transition: all 0.3s ease;
     }
     
     .task-card:hover {
       transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     
-    .fab {
+    .bottom-nav {
       position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 50;
-      transition: all 0.3s ease;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+      z-index: 1000;
+      border-top: 1px solid #e5e7eb;
     }
     
-    .fab:hover {
-      transform: scale(1.1);
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    
+    .nav-item.active {
+      color: #2563eb;
+    }
+    
+    .nav-item:hover {
+      background: #f3f4f6;
+    }
+    
+    .nav-item .material-icons {
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+    
+    .nav-item span {
+      font-size: 11px;
+      font-weight: 500;
     }
     
     .loading {
       display: inline-block;
       width: 20px;
       height: 20px;
-      border: 3px solid rgba(255,255,255,.3);
+      border: 3px solid rgba(59, 130, 246, 0.3);
       border-radius: 50%;
-      border-top-color: #fff;
+      border-top-color: #3b82f6;
       animation: spin 1s ease-in-out infinite;
     }
     
@@ -56,474 +91,310 @@
       to { transform: rotate(360deg); }
     }
     
-    .stat-card {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    
     .header-gradient {
       background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
     }
+    
+    .page {
+      display: none;
+    }
+    
+    .page.active {
+      display: block;
+    }
+    
+    .stat-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(255,255,255,0.2);
+    }
+    
+    .fab {
+      position: fixed;
+      bottom: 90px;
+      right: 20px;
+      z-index: 50;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    .fab:hover {
+      transform: scale(1.1);
+    }
+
+    /* Notification badge */
+    .notification-badge {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: #ef4444;
+      color: white;
+      border-radius: 10px;
+      padding: 2px 6px;
+      font-size: 10px;
+      font-weight: bold;
+      min-width: 18px;
+      text-align: center;
+    }
+
+    /* Skeleton loading */
+    .skeleton {
+      background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+      background-size: 200% 100%;
+      animation: loading 1.5s ease-in-out infinite;
+    }
+
+    @keyframes loading {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-gray-50">
   
-  <!-- Header -->
+  <!-- Top Header -->
   <header class="header-gradient text-white shadow-lg sticky top-0 z-40">
     <div class="max-w-7xl mx-auto px-4 py-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-3">
-          <button id="menuBtn" class="p-2 hover:bg-white/10 rounded-lg transition">
-            <span class="material-icons">menu</span>
-          </button>
+          <div class="bg-white/20 p-2 rounded-xl">
+            <span class="material-icons text-2xl">school</span>
+          </div>
           <div>
-            <h1 class="text-xl font-bold">KruBoard</h1>
-            <p class="text-xs text-blue-100">กระดานรวมงานคุณครู (KB)</p>
+            <h1 class="text-lg font-bold">KruBoard</h1>
+            <p class="text-xs text-blue-100">กระดานรวมงานคุณครู</p>
           </div>
         </div>
-        <button id="refreshBtn" class="flex items-center space-x-2 bg-white text-blue-600 px-4 py-2 rounded-lg font-medium hover:bg-blue-50 transition">
-          <span class="material-icons text-xl">refresh</span>
-          <span class="hidden sm:inline">รีเฟรช</span>
-        </button>
+        <div class="flex items-center space-x-2">
+          <button id="notificationBtn" class="relative p-2 hover:bg-white/10 rounded-lg transition">
+            <span class="material-icons">notifications</span>
+            <span class="notification-badge" id="notificationCount">3</span>
+          </button>
+          <button id="refreshBtn" class="p-2 hover:bg-white/10 rounded-lg transition">
+            <span class="material-icons">refresh</span>
+          </button>
+        </div>
       </div>
       
-      <!-- Stats Bar -->
-      <div class="flex items-center space-x-4 mt-4 text-sm">
-        <div class="flex items-center space-x-1">
-          <span class="material-icons text-lg">assignment</span>
-          <span id="totalTasks" class="font-semibold">0</span>
+      <!-- Quick Stats -->
+      <div class="flex items-center space-x-2 mt-3 overflow-x-auto pb-2">
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">assignment</span>
+          <span id="headerTotalTasks">0</span>
         </div>
-        <div class="flex items-center space-x-1">
-          <span class="material-icons text-lg">schedule</span>
-          <span id="upcomingTasks" class="font-semibold">0</span>
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">schedule</span>
+          <span id="headerUpcomingTasks">0</span>
         </div>
-        <div class="flex items-center space-x-1">
-          <span class="material-icons text-lg">people</span>
-          <span id="totalUsers" class="font-semibold">0</span>
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">people</span>
+          <span id="headerTotalUsers">0</span>
+        </div>
+        <div class="stat-badge flex-shrink-0">
+          <span class="material-icons text-sm mr-1">check_circle</span>
+          <span id="headerCompletionRate">0%</span>
         </div>
       </div>
     </div>
   </header>
 
-  <!-- Main Content -->
-  <main class="max-w-7xl mx-auto px-4 py-6 pb-24">
+  <!-- Main Content Container -->
+  <main class="max-w-7xl mx-auto">
     
-    <!-- Close Button (Optional) -->
-    <div class="flex justify-end mb-4">
-      <button id="closeBtn" class="bg-blue-600 text-white p-2 rounded-full shadow-lg hover:bg-blue-700 transition">
-        <span class="material-icons">close</span>
-      </button>
-    </div>
+    <!-- Home Page -->
+    <div id="homePage" class="page active px-4 py-4">
+      <!-- Upcoming Tasks -->
+      <section class="mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center">
+            <span class="material-icons text-green-600 mr-2">event_available</span>
+            งานที่กำลังจะถึง
+          </h2>
+          <div class="flex space-x-1">
+            <button class="time-filter active bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-medium" data-days="7">7 วัน</button>
+            <button class="time-filter bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-xs font-medium" data-days="15">15 วัน</button>
+            <button class="time-filter bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-xs font-medium" data-days="30">30 วัน</button>
+          </div>
+        </div>
+        
+        <div id="taskCardsContainer" class="space-y-3">
+          <!-- Loading skeleton -->
+          <div class="skeleton h-24 rounded-xl"></div>
+          <div class="skeleton h-24 rounded-xl"></div>
+        </div>
+      </section>
 
-    <!-- Upcoming Tasks Section -->
-    <section class="mb-8">
-      <div class="bg-white rounded-2xl shadow-md p-6">
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center space-x-2">
-            <span class="material-icons text-green-600 text-3xl">event_available</span>
-            <div>
-              <h2 class="text-xl font-bold text-gray-800">งานที่กำลังจะถึง</h2>
-              <p class="text-xs text-gray-500">มาถึง</p>
+      <!-- Quick Stats Grid -->
+      <section class="mb-6">
+        <h2 class="text-lg font-bold text-gray-800 mb-3 flex items-center">
+          <span class="material-icons text-purple-600 mr-2">assessment</span>
+          สถิติภาพรวม
+        </h2>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-gradient-to-br from-green-400 to-green-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">check_circle</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">เสร็จแล้ว</span>
             </div>
+            <div class="text-2xl font-bold" id="completedCount">0</div>
+            <div class="text-xs opacity-90">งานที่เสร็จสมบูรณ์</div>
           </div>
           
-          <!-- Time Filter Buttons -->
-          <div class="flex space-x-2">
-            <button class="time-filter active bg-blue-600 text-white px-3 py-1 rounded-lg text-sm font-medium transition" data-days="7">7<br>วัน</button>
-            <button class="time-filter bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-sm font-medium hover:bg-gray-300 transition" data-days="15">15<br>วัน</button>
-            <button class="time-filter bg-gray-200 text-gray-700 px-3 py-1 rounded-lg text-sm font-medium hover:bg-gray-300 transition" data-days="30">30<br>วัน</button>
+          <div class="bg-gradient-to-br from-orange-400 to-orange-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">pending</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">รอดำเนินการ</span>
+            </div>
+            <div class="text-2xl font-bold" id="pendingCount">0</div>
+            <div class="text-xs opacity-90">งานที่ค้างอยู่</div>
+          </div>
+          
+          <div class="bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">today</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">เดือนนี้</span>
+            </div>
+            <div class="text-2xl font-bold" id="monthTaskCount">0</div>
+            <div class="text-xs opacity-90">งานประจำเดือน</div>
+          </div>
+          
+          <div class="bg-gradient-to-br from-purple-400 to-purple-600 rounded-xl p-4 text-white shadow-md">
+            <div class="flex items-center justify-between mb-2">
+              <span class="material-icons text-2xl">trending_up</span>
+              <span class="text-xs bg-white/20 px-2 py-1 rounded-full">ความสำเร็จ</span>
+            </div>
+            <div class="text-2xl font-bold" id="completionRate">0%</div>
+            <div class="text-xs opacity-90">อัตราการทำงาน</div>
           </div>
         </div>
+      </section>
 
-        <!-- Task Cards Container -->
-        <div id="taskCardsContainer" class="space-y-4 max-h-[500px] overflow-y-auto">
-          <!-- Tasks will be loaded here -->
-          <div class="flex justify-center py-8">
-            <div class="loading border-blue-600"></div>
-          </div>
-        </div>
-
-        <!-- View All Link -->
-        <div class="mt-4 text-center">
-          <a href="#" id="viewAllLink" class="text-blue-600 hover:text-blue-700 font-medium text-sm">
-            ดูเพิ่มเติมทั้งหมด
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <!-- Statistics Section -->
-    <section class="mb-8">
-      <div class="bg-white rounded-2xl shadow-md p-6">
-        <div class="flex items-center space-x-2 mb-4">
-          <span class="material-icons text-purple-600 text-3xl">assessment</span>
-          <h2 class="text-xl font-bold text-gray-800">การงานคุณครู</h2>
-        </div>
-
-        <!-- Info Box -->
-        <div class="bg-blue-50 border-l-4 border-blue-600 p-4 mb-4 rounded-lg">
+      <!-- System Info -->
+      <section class="mb-6">
+        <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-4">
           <div class="flex items-start space-x-3">
-            <span class="material-icons text-blue-600 mt-1">info</span>
+            <span class="material-icons text-blue-600 text-2xl">info</span>
             <div class="flex-1">
-              <p class="text-sm text-gray-700 leading-relaxed mb-2">
-                <strong>ระบบนับระบายงานแบบกำหนดชัดเจน:</strong> งานสอน=1.8, ประชา=0.8, ทั้งกรรม=12, วิชาการ=2.0, โครงการ=1.5, ปรับระ=2.2
-              </p>
-              <p class="text-xs text-gray-600">
-                <strong>คะแนน:</strong> อ่านรายละเอียด=เชิญ+ส่วนสามหา=ครบ+ราคา
+              <h3 class="font-semibold text-gray-800 mb-1">ระบบคำนวณภาระงาน</h3>
+              <p class="text-sm text-gray-600 leading-relaxed">
+                งานสอน=1.8 | ประชุม=0.8 | ทั้งกรรม=12 | วิชาการ=2.0 | โครงการ=1.5 | ปรับระ=2.2
               </p>
             </div>
           </div>
         </div>
+      </section>
+    </div>
 
-        <!-- Read More Button -->
-        <button id="readMoreBtn" class="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 rounded-lg font-medium hover:shadow-lg transition">
-          อ่านรายละเอียด
+    <!-- Tasks Page -->
+    <div id="tasksPage" class="page px-4 py-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold text-gray-800">งานทั้งหมด</h2>
+        <button id="filterBtn" class="flex items-center space-x-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm">
+          <span class="material-icons text-sm">filter_list</span>
+          <span>กรอง</span>
         </button>
+      </div>
+      
+      <div id="allTasksContainer" class="space-y-3">
+        <!-- Tasks will be loaded here -->
+      </div>
+    </div>
 
-        <!-- Quick Stats Grid -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-          <div class="bg-gradient-to-br from-green-400 to-green-600 rounded-xl p-4 text-white">
-            <div class="text-3xl font-bold" id="completedCount">0</div>
-            <div class="text-sm opacity-90">งานเสร็จแล้ว</div>
+    <!-- Teachers Page -->
+    <div id="teachersPage" class="page px-4 py-4">
+      <h2 class="text-xl font-bold text-gray-800 mb-4">สถิติครูทั้งหมด</h2>
+      <div id="userStatsContainer" class="space-y-2">
+        <!-- User stats will be loaded here -->
+      </div>
+    </div>
+
+    <!-- Profile Page -->
+    <div id="profilePage" class="page px-4 py-4">
+      <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
+        <div class="flex items-center space-x-4 mb-6">
+          <div class="w-20 h-20 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl font-bold">
+            K
           </div>
-          <div class="bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl p-4 text-white">
-            <div class="text-3xl font-bold" id="pendingCount">0</div>
-            <div class="text-sm opacity-90">งานค้างอยู่</div>
-          </div>
-          <div class="bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl p-4 text-white">
-            <div class="text-3xl font-bold" id="monthTaskCount">0</div>
-            <div class="text-sm opacity-90">งานเดือนนี้</div>
-          </div>
-          <div class="bg-gradient-to-br from-purple-400 to-purple-600 rounded-xl p-4 text-white">
-            <div class="text-3xl font-bold" id="completionRate">0%</div>
-            <div class="text-sm opacity-90">อัตราสำเร็จ</div>
+          <div>
+            <h2 class="text-xl font-bold text-gray-800">โรงเรียนบ้านวังด้ง</h2>
+            <p class="text-sm text-gray-600">ระบบจัดการงานครู</p>
           </div>
         </div>
-      </div>
-    </section>
-
-    <!-- Teachers Statistics -->
-    <section class="mb-8">
-      <div class="bg-white rounded-2xl shadow-md p-6">
-        <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center space-x-2">
-          <span class="material-icons text-indigo-600">school</span>
-          <span>สถิติงานครู</span>
-        </h2>
-        <div id="userStatsContainer" class="space-y-3">
-          <!-- User stats will be loaded here -->
+        
+        <div class="space-y-3">
+          <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-gray-600">settings</span>
+              <span class="text-gray-800">ตั้งค่า</span>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+          
+          <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-gray-600">help</span>
+              <span class="text-gray-800">ช่วยเหลือ</span>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
+          
+          <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition">
+            <div class="flex items-center space-x-3">
+              <span class="material-icons text-gray-600">info</span>
+              <span class="text-gray-800">เกี่ยวกับ</span>
+            </div>
+            <span class="material-icons text-gray-400">chevron_right</span>
+          </button>
         </div>
       </div>
-    </section>
+
+      <button class="w-full bg-red-50 text-red-600 p-4 rounded-xl font-medium hover:bg-red-100 transition flex items-center justify-center space-x-2">
+        <span class="material-icons">logout</span>
+        <span>ออกจากระบบ</span>
+      </button>
+    </div>
 
   </main>
 
   <!-- Floating Action Button -->
-  <button class="fab bg-blue-600 text-white p-4 rounded-full shadow-xl hover:bg-blue-700">
+  <button id="fabBtn" class="fab bg-blue-600 text-white p-4 rounded-full hidden">
     <span class="material-icons">keyboard_arrow_up</span>
   </button>
 
-  <!-- Mobile Menu (Hidden by default) -->
-  <div id="mobileMenu" class="fixed inset-0 bg-black/50 z-50 hidden">
-    <div class="bg-white w-64 h-full shadow-2xl">
-      <div class="p-6">
-        <div class="flex items-center justify-between mb-6">
-          <h3 class="text-xl font-bold text-gray-800">เมนู</h3>
-          <button id="closeMenuBtn" class="p-2 hover:bg-gray-100 rounded-lg">
-            <span class="material-icons">close</span>
-          </button>
-        </div>
-        <nav class="space-y-2">
-          <a href="#" class="flex items-center space-x-3 p-3 hover:bg-blue-50 rounded-lg transition">
-            <span class="material-icons text-blue-600">dashboard</span>
-            <span>หน้าหลัก</span>
-          </a>
-          <a href="#" class="flex items-center space-x-3 p-3 hover:bg-blue-50 rounded-lg transition">
-            <span class="material-icons text-blue-600">assignment</span>
-            <span>งานทั้งหมด</span>
-          </a>
-          <a href="#" class="flex items-center space-x-3 p-3 hover:bg-blue-50 rounded-lg transition">
-            <span class="material-icons text-blue-600">people</span>
-            <span>ครูทั้งหมด</span>
-          </a>
-          <a href="#" class="flex items-center space-x-3 p-3 hover:bg-blue-50 rounded-lg transition">
-            <span class="material-icons text-blue-600">settings</span>
-            <span>ตั้งค่า</span>
-          </a>
-        </nav>
-      </div>
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <div class="max-w-7xl mx-auto flex justify-around items-center py-2">
+      <a href="#home" class="nav-item active" data-page="homePage">
+        <span class="material-icons">home</span>
+        <span>หน้าหลัก</span>
+      </a>
+      <a href="#tasks" class="nav-item" data-page="tasksPage">
+        <span class="material-icons">assignment</span>
+        <span>งานทั้งหมด</span>
+      </a>
+      <a href="#teachers" class="nav-item" data-page="teachersPage">
+        <span class="material-icons">people</span>
+        <span>ครู</span>
+      </a>
+      <a href="#profile" class="nav-item" data-page="profilePage">
+        <span class="material-icons">account_circle</span>
+        <span>โปรไฟล์</span>
+      </a>
     </div>
+  </nav>
+
+  <!-- Loading Toast -->
+  <div id="loadingToast" class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-white shadow-lg rounded-full px-6 py-3 hidden z-50 flex items-center space-x-3">
+    <div class="loading"></div>
+    <span class="text-sm font-medium text-gray-700">กำลังโหลดข้อมูล...</span>
   </div>
 
-  <script>
-    // Global state
-    let currentDays = 7;
-    let allStats = {};
-
-    // Initialize
-    document.addEventListener('DOMContentLoaded', () => {
-      loadDashboardData();
-      setupEventListeners();
-    });
-
-    // Event Listeners
-    function setupEventListeners() {
-      // Time filter buttons
-      document.querySelectorAll('.time-filter').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          document.querySelectorAll('.time-filter').forEach(b => {
-            b.classList.remove('active', 'bg-blue-600', 'text-white');
-            b.classList.add('bg-gray-200', 'text-gray-700');
-          });
-          e.currentTarget.classList.add('active', 'bg-blue-600', 'text-white');
-          e.currentTarget.classList.remove('bg-gray-200', 'text-gray-700');
-          
-          currentDays = parseInt(e.currentTarget.dataset.days);
-          loadUpcomingTasks(currentDays);
-        });
-      });
-
-      // Refresh button
-      document.getElementById('refreshBtn').addEventListener('click', () => {
-        loadDashboardData();
-      });
-
-      // Menu buttons
-      document.getElementById('menuBtn').addEventListener('click', () => {
-        document.getElementById('mobileMenu').classList.remove('hidden');
-      });
-
-      document.getElementById('closeMenuBtn').addEventListener('click', () => {
-        document.getElementById('mobileMenu').classList.add('hidden');
-      });
-
-      // Close button
-      document.getElementById('closeBtn')?.addEventListener('click', () => {
-        document.getElementById('mobileMenu').classList.add('hidden');
-      });
-
-      // FAB scroll to top
-      document.querySelector('.fab').addEventListener('click', () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-
-      // Read More button
-      document.getElementById('readMoreBtn').addEventListener('click', () => {
-        alert('รายละเอียดเพิ่มเติมเกี่ยวกับระบบคะแนนงานครู');
-      });
-    }
-
-    // Load Dashboard Data
-    async function loadDashboardData() {
-      try {
-        // Load stats
-        const stats = await callGoogleScript('getDashboardStats', currentDays);
-        allStats = stats;
-        updateStatsDisplay(stats);
-
-        // Load upcoming tasks
-        await loadUpcomingTasks(currentDays);
-
-        // Load user statistics
-        await loadUserStatistics();
-
-      } catch (error) {
-        console.error('Error loading dashboard:', error);
-        showError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-      }
-    }
-
-    // Update Stats Display
-    function updateStatsDisplay(stats) {
-      const summary = stats.summary || {};
-      
-      document.getElementById('totalTasks').textContent = summary.totalTasks || 0;
-      document.getElementById('upcomingTasks').textContent = summary.upcomingTasks || 0;
-      document.getElementById('totalUsers').textContent = summary.uniqueAssignees || 0;
-      
-      document.getElementById('completedCount').textContent = summary.completedTasks || 0;
-      document.getElementById('pendingCount').textContent = summary.pendingTasks || 0;
-      document.getElementById('monthTaskCount').textContent = summary.currentMonthTasks || 0;
-      document.getElementById('completionRate').textContent = (summary.completionRate || 0) + '%';
-    }
-
-    // Load Upcoming Tasks
-    async function loadUpcomingTasks(days) {
-      const container = document.getElementById('taskCardsContainer');
-      container.innerHTML = '<div class="flex justify-center py-8"><div class="loading border-blue-600"></div></div>';
-
-      try {
-        const tasks = await callGoogleScript('getUpcomingTasks', days);
-        
-        if (!tasks || tasks.length === 0) {
-          container.innerHTML = `
-            <div class="text-center py-8 text-gray-500">
-              <span class="material-icons text-5xl mb-2">assignment_turned_in</span>
-              <p>ไม่มีงานที่กำลังจะถึงในช่วงเวลานี้</p>
-            </div>
-          `;
-          return;
-        }
-
-        container.innerHTML = tasks.slice(0, 5).map(task => createTaskCard(task)).join('');
-        
-      } catch (error) {
-        console.error('Error loading tasks:', error);
-        container.innerHTML = '<div class="text-center py-8 text-red-500">เกิดข้อผิดพลาดในการโหลดงาน</div>';
-      }
-    }
-
-    // Create Task Card HTML
-    function createTaskCard(task) {
-      const daysLeft = parseInt(task.daysUntilDue) || 0;
-      const isUrgent = daysLeft <= 3;
-      const avatarUrl = task.assigneeAvatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(task.assignee);
-
-      return `
-        <div class="task-card border-l-4 ${isUrgent ? 'border-red-500 bg-red-50' : 'border-yellow-400 bg-white'} rounded-lg p-4 shadow-sm">
-          <div class="flex items-start space-x-3">
-            <img src="${avatarUrl}" alt="${task.assignee}" class="w-12 h-12 rounded-full object-cover border-2 border-white shadow">
-            <div class="flex-1 min-w-0">
-              <h3 class="font-semibold text-gray-800 mb-1 line-clamp-2">${task.name}</h3>
-              <div class="flex items-center space-x-2 text-sm text-gray-600 mb-2">
-                <span class="material-icons text-sm">person</span>
-                <span class="truncate">${task.assignee}</span>
-              </div>
-              <div class="flex items-center space-x-2 text-sm text-gray-600">
-                <span class="material-icons text-sm">event</span>
-                <span>${task.dueDateThai}</span>
-              </div>
-              ${task.link ? `
-                <a href="${task.link}" target="_blank" class="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-700 mt-2 text-sm">
-                  <span class="material-icons text-sm">open_in_new</span>
-                  <span>เปิดงาน</span>
-                </a>
-              ` : ''}
-            </div>
-            <div class="flex flex-col items-center">
-              <span class="material-icons ${isUrgent ? 'text-red-500' : 'text-yellow-500'} text-2xl">
-                ${isUrgent ? 'warning' : 'schedule'}
-              </span>
-              <span class="text-xs font-semibold ${isUrgent ? 'text-red-600' : 'text-yellow-600'} mt-1">
-                ${daysLeft} วัน
-              </span>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    // Load User Statistics
-    async function loadUserStatistics() {
-      const container = document.getElementById('userStatsContainer');
-      
-      try {
-        const userStats = await callGoogleScript('getUserStatistics');
-        
-        if (!userStats || userStats.length === 0) {
-          container.innerHTML = '<p class="text-center text-gray-500 py-4">ไม่มีข้อมูลสถิติ</p>';
-          return;
-        }
-
-        container.innerHTML = userStats.slice(0, 10).map((user, index) => `
-          <div class="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition">
-            <div class="flex items-center space-x-3 flex-1">
-              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm">
-                ${index + 1}
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="font-medium text-gray-800 truncate">${user.assignee}</p>
-                <p class="text-xs text-gray-500">${user.email}</p>
-              </div>
-            </div>
-            <div class="text-right">
-              <div class="text-lg font-bold text-gray-800">${user.totalTasks}</div>
-              <div class="text-xs text-green-600">${user.completionRate}% เสร็จ</div>
-            </div>
-          </div>
-        `).join('');
-        
-      } catch (error) {
-        console.error('Error loading user stats:', error);
-        container.innerHTML = '<p class="text-center text-red-500 py-4">เกิดข้อผิดพลาด</p>';
-      }
-    }
-
-    // Call Google Apps Script function
-    function callGoogleScript(functionName, ...args) {
-      return new Promise((resolve, reject) => {
-        if (typeof google !== 'undefined' && google.script && google.script.run) {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler(reject)
-            [functionName](...args);
-        } else {
-          // Mock data for testing
-          console.warn('Google Apps Script not available, using mock data');
-          resolve(getMockData(functionName, args));
-        }
-      });
-    }
-
-    // Mock data for testing
-    function getMockData(functionName, args) {
-      const mockData = {
-        getDashboardStats: {
-          summary: {
-            totalTasks: 1405,
-            completedTasks: 426,
-            pendingTasks: 979,
-            currentYearTasks: 1200,
-            currentMonthTasks: 85,
-            upcomingTasks: 42,
-            uniqueAssignees: 12,
-            completionRate: 30
-          }
-        },
-        getUpcomingTasks: [
-          {
-            id: 'WD1',
-            name: 'การรายงานผลการออกใบยาบุญญ การตรวจสอบและการรับรองมาตรฐาน ต่าง ๆ ประจำปีงบประมาณ พ.ศ.2568',
-            assignee: 'อำภา นาน',
-            assigneeEmail: 'teacher@school.ac.th',
-            assigneeAvatar: '',
-            dueDate: '2024-10-15',
-            dueDateThai: '15 ตุลาคม 2568',
-            daysUntilDue: '1',
-            link: 'https://app.asana.com/0/1234/5678',
-            isUrgent: 'true'
-          },
-          {
-            id: 'WD2',
-            name: 'การรายงานผลการออกใบยาบุญญ การตรวจสอบและการรับรองมาตรฐาน',
-            assignee: 'สมชาย ใจดี',
-            assigneeEmail: 'teacher2@school.ac.th',
-            assigneeAvatar: '',
-            dueDate: '2024-10-18',
-            dueDateThai: '18 ตุลาคม 2568',
-            daysUntilDue: '4',
-            link: 'https://app.asana.com/0/1234/5679'
-          }
-        ],
-        getUserStatistics: [
-          { assignee: 'อำภา นาน', email: 'teacher@school.ac.th', totalTasks: 145, completedTasks: 98, pendingTasks: 47, completionRate: 68 },
-          { assignee: 'สมชาย ใจดี', email: 'teacher2@school.ac.th', totalTasks: 132, completedTasks: 87, pendingTasks: 45, completionRate: 66 }
-        ]
-      };
-      
-      return mockData[functionName] || null;
-    }
-
-    // Show error message
-    function showError(message) {
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50';
-      errorDiv.textContent = message;
-      document.body.appendChild(errorDiv);
-      
-      setTimeout(() => {
-        errorDiv.remove();
-      }, 3000);
-    }
-  </script>
+  <!-- App Script -->
+  <script src="app.js"></script>
 
 </body>
 </html>

@@ -1092,33 +1092,78 @@ function handleUpdateStatus(taskId){
   }).finally(()=> showLoading(false));
 }
 
-function jsonpRequest(params){
+function jsonpRequest(params, retryCount = 0){
+  const maxRetries = 2;
+  const baseTimeout = 30000; // 30 seconds base timeout
+  
   return new Promise((resolve, reject)=>{
     const callbackName = `jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const query = new URLSearchParams({ ...(params || {}), callback: callbackName });
     const script = document.createElement('script');
     script.src = `${APP_CONFIG.scriptUrl}?${query.toString()}`;
-    let timeoutId = setTimeout(()=>{
-      cleanup();
-      reject(new Error('JSONP timeout'));
-    }, 15000);
-    function cleanup(){
-      clearTimeout(timeoutId);
-      delete window[callbackName];
-      if (script.parentNode){
-        script.parentNode.removeChild(script);
+    
+    let timeoutId = null;
+    let isResolved = false;
+    
+    // Set timeout with exponential backoff
+    const timeout = baseTimeout * Math.pow(1.5, retryCount);
+    timeoutId = setTimeout(()=>{
+      if (!isResolved){
+        cleanup();
+        if (retryCount < maxRetries){
+          console.log(`JSONP timeout, retrying... (attempt ${retryCount + 2}/${maxRetries + 1})`);
+          jsonpRequest(params, retryCount + 1)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          reject(new Error('JSONP timeout after retries'));
+        }
       }
+    }, timeout);
+    
+    function cleanup(){
+      if (timeoutId){
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      // Delay cleanup to allow late responses
+      setTimeout(()=>{
+        if (window[callbackName]){
+          delete window[callbackName];
+        }
+        if (script.parentNode){
+          script.parentNode.removeChild(script);
+        }
+      }, 1000);
     }
+    
+    // Set up callback
     window[callbackName] = data=>{
-      cleanup();
-      resolve(data);
+      if (!isResolved){
+        isResolved = true;
+        cleanup();
+        resolve(data);
+      }
     };
+    
     script.onerror = ()=>{
-      cleanup();
-      const err = new Error('JSONP network error');
-      err.code = 'JSONP_NETWORK';
-      reject(err);
+      if (!isResolved){
+        isResolved = true;
+        cleanup();
+        if (retryCount < maxRetries){
+          console.log(`JSONP network error, retrying... (attempt ${retryCount + 2}/${maxRetries + 1})`);
+          jsonpRequest(params, retryCount + 1)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          const err = new Error('JSONP network error after retries');
+          err.code = 'JSONP_NETWORK';
+          reject(err);
+        }
+      }
     };
+    
+    // Add script to document
     document.body.appendChild(script);
   });
 }

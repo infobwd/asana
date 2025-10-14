@@ -1,4 +1,4 @@
-/* KruBoard front-end (GitHub hosted) - Updated Version */
+/* KruBoard front-end (GitHub hosted) */
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
   liffId: '2006490627-3NpRPl0G'
@@ -14,6 +14,7 @@ const state = {
   personalStats: null,
   currentUser: null,
   notifications: [],
+  teachers: [],
   filteredTasks: [],
   taskFilters: { status:'all', search:'' },
   taskPagination: { page:1, pageSize:10, totalPages:1 },
@@ -21,11 +22,7 @@ const state = {
   apiKey: localStorage.getItem('kruboard_api_key') || ''
 };
 
-// Thai months for date formatting
-const THAI_MONTHS = [
-  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-];
+const THAI_MONTHS = ['เธกเธเธฃเธฒเธเธก','เธเธธเธกเธ เธฒเธเธฑเธเธเน','เธกเธตเธเธฒเธเธก','เน€เธกเธฉเธฒเธขเธ','เธเธคเธฉเธ เธฒเธเธก','เธกเธดเธ–เธธเธเธฒเธขเธ','เธเธฃเธเธเธฒเธเธก','เธชเธดเธเธซเธฒเธเธก','เธเธฑเธเธขเธฒเธขเธ','เธ•เธธเธฅเธฒเธเธก','เธเธคเธจเธเธดเธเธฒเธขเธ','เธเธฑเธเธงเธฒเธเธก'];
 
 const els = {
   navItems: [],
@@ -55,6 +52,7 @@ const els = {
     month: document.getElementById('myMonthTaskCount'),
     upcoming: document.getElementById('myUpcomingCount')
   },
+  teacherListContainer: document.getElementById('teacherListContainer') || document.getElementById('userStatsContainer'),
   notificationCount: document.getElementById('notificationCount'),
   taskCardsContainer: document.getElementById('taskCardsContainer'),
   allTasksContainer: document.getElementById('allTasksContainer'),
@@ -72,17 +70,14 @@ const els = {
   taskPaginationInfo: document.getElementById('taskPaginationInfo'),
   taskPaginationWrapper: document.getElementById('taskPagination'),
   addTaskBtn: document.getElementById('addTaskBtn'),
-  // Modal elements
-  taskModal: null,
-  modalLoading: null,
-  taskForm: null,
-  closeModalBtn: null,
-  cancelModalBtn: null,
-  submitTaskBtn: null,
-  taskNameInput: null,
-  taskAssigneeInput: null,
-  taskDueDateInput: null,
-  taskNotesInput: null
+  addTaskModal: document.getElementById('addTaskModal'),
+  addTaskForm: document.getElementById('addTaskForm'),
+  addTaskAssignee: document.getElementById('addTaskAssignee'),
+  addTaskName: document.getElementById('addTaskName'),
+  addTaskDueDate: document.getElementById('addTaskDueDate'),
+  addTaskNotes: document.getElementById('addTaskNotes'),
+  addTaskCancelBtn: document.getElementById('addTaskCancelBtn'),
+  addTaskCloseBtn: document.getElementById('addTaskCloseBtn')
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -90,7 +85,6 @@ document.addEventListener('DOMContentLoaded', init);
 function init(){
   cachePages();
   bindUI();
-  initModalElements();
   showLoading(true);
   initializeLiff()
     .catch(err=>{
@@ -102,162 +96,11 @@ function init(){
       loadPublicData()
         .then(()=> state.isLoggedIn ? loadSecureData() : null)
         .catch(err=>{
-          handleDataError(err, 'โหลดข้อมูลล้มเหลว กรุณาลองใหม่');
+          handleDataError(err, 'เนเธซเธฅเธ”เธเนเธญเธกเธนเธฅเธฅเนเธกเน€เธซเธฅเธง เธเธฃเธธเธ“เธฒเธฅเธญเธเนเธซเธกเน');
         })
         .finally(()=> showLoading(false));
     });
 }
-
-function initModalElements(){
-  els.taskModal = document.getElementById('taskModal');
-  els.modalLoading = document.getElementById('modalLoading');
-  els.taskForm = document.getElementById('taskForm');
-  els.closeModalBtn = document.getElementById('closeModalBtn');
-  els.cancelModalBtn = document.getElementById('cancelModalBtn');
-  els.submitTaskBtn = document.getElementById('submitTaskBtn');
-  els.taskNameInput = document.getElementById('taskName');
-  els.taskAssigneeInput = document.getElementById('taskAssignee');
-  els.taskDueDateInput = document.getElementById('taskDueDate');
-  els.taskNotesInput = document.getElementById('taskNotes');
-  
-  // Bind modal events
-  if (els.closeModalBtn){
-    els.closeModalBtn.addEventListener('click', closeTaskModal);
-  }
-  if (els.cancelModalBtn){
-    els.cancelModalBtn.addEventListener('click', closeTaskModal);
-  }
-  if (els.taskForm){
-    els.taskForm.addEventListener('submit', handleTaskFormSubmit);
-  }
-  // Close modal on outside click
-  if (els.taskModal){
-    els.taskModal.addEventListener('click', (evt)=>{
-      if (evt.target === els.taskModal){
-        closeTaskModal();
-      }
-    });
-  }
-}
-
-function openTaskModal(){
-  if (!els.taskModal) return;
-  els.taskModal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-  // Reset form
-  if (els.taskForm){
-    els.taskForm.reset();
-  }
-  // Set today as minimum date
-  if (els.taskDueDateInput){
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    els.taskDueDateInput.min = `${yyyy}-${mm}-${dd}`;
-  }
-}
-
-function closeTaskModal(){
-  if (els.taskModal){
-    els.taskModal.classList.add('hidden');
-  }
-  document.body.style.overflow = '';
-}
-
-function showModalLoading(show){
-  if (els.modalLoading){
-    els.modalLoading.classList.toggle('hidden', !show);
-  }
-}
-
-async function handleTaskFormSubmit(evt){
-  evt.preventDefault();
-  
-  if (!state.isLoggedIn){
-    toastInfo('กรุณาเข้าสู่ระบบก่อน');
-    return;
-  }
-  
-  if (!state.isAdmin){
-    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
-    return;
-  }
-  
-  const name = (els.taskNameInput?.value || '').trim();
-  const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
-  const dueDate = (els.taskDueDateInput?.value || '').trim();
-  const notes = (els.taskNotesInput?.value || '').trim();
-  
-  if (!name){
-    toastInfo('กรุณากรอกชื่องาน');
-    return;
-  }
-  
-  showModalLoading(true);
-  closeTaskModal();
-  
-  try{
-    const res = await jsonpRequest({
-      action:'asana_create_task',
-      name,
-      assigneeEmail,
-      dueDate,
-      notes,
-      idToken: state.profile?.idToken || '',
-      pass: state.apiKey || ''
-    });
-    
-    if (!res || res.success === false){
-      throw new Error(res?.message || 'create task error');
-    }
-    
-    toastInfo('สร้างงานใหม่สำเร็จ');
-    await Promise.all([loadSecureData(), loadPublicData()]);
-  }catch(err){
-    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
-  }finally{
-    showModalLoading(false);
-  }
-}
-
-function formatThaiDate(dateString){
-  if (!dateString || dateString === 'No Due Date') return 'ไม่มีวันครบกำหนด';
-  
-  let date;
-  if (dateString instanceof Date){
-    date = dateString;
-  } else {
-    date = new Date(dateString + 'T00:00:00+07:00');
-  }
-  
-  if (isNaN(date)) return dateString;
-  
-  const day = date.getDate();
-  const month = THAI_MONTHS[date.getMonth()];
-  const year = date.getFullYear() + 543;
-  
-  return `${day} ${month} ${year}`;
-}
-
-function formatDueMeta_(dueDate){
-  if (!dueDate || dueDate === 'No Due Date') return '';
-  const iso = `${dueDate}T00:00:00+07:00`;
-  const due = new Date(iso);
-  if (isNaN(due)) return '';
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  due.setHours(0,0,0,0);
-  const diff = Math.round((due - today)/(24*60*60*1000));
-  
-  if (diff === 0) return '(ครบกำหนดวันนี้)';
-  if (diff === 1) return '(พรุ่งนี้)';
-  if (diff === -1) return '(เมื่อวาน)';
-  if (diff > 0) return `(อีก ${diff} วัน)`;
-  return `(เกินกำหนด ${Math.abs(diff)} วัน)`;
-}
-
-// Other functions remain the same until we get to specific ones that need updating...
 
 function cachePages(){
   const pages = Array.from(document.querySelectorAll('.page'));
@@ -270,7 +113,7 @@ function cachePages(){
   els.profilePage = els.pages.profilePage;
   els.navItems = els.nav;
   if (!els.homePage){
-    console.warn('homePage not found – layout may be outdated');
+    console.warn('homePage not found โ€“ layout may be outdated');
   }
 }
 
@@ -280,7 +123,7 @@ function bindUI(){
       evt.preventDefault();
       const pageId = item.getAttribute('data-page');
       if (!state.isLoggedIn && pageId !== 'homePage'){
-        toastInfo('กรุณาเข้าสู่ระบบผ่าน LINE เพื่อดูรายละเอียด');
+        toastInfo('เธเธฃเธธเธ“เธฒเน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE เน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”');
         return;
       }
       switchPage(pageId);
@@ -294,7 +137,7 @@ function bindUI(){
       Promise.all([loadPublicData(), target])
         .catch(err=>{
           console.error('Refresh error:', err);
-          toastError('รีเฟรชข้อมูลไม่สำเร็จ');
+          toastError('เธฃเธตเน€เธเธฃเธเธเนเธญเธกเธนเธฅเนเธกเนเธชเธณเน€เธฃเนเธ');
         })
         .finally(()=> showLoading(false));
     });
@@ -368,11 +211,29 @@ function bindUI(){
   }
 
   if (els.addTaskBtn){
-    els.addTaskBtn.addEventListener('click', openTaskModal);
+    els.addTaskBtn.addEventListener('click', openAddTaskModal);
+  }
+  if (els.addTaskForm){
+    els.addTaskForm.addEventListener('submit', submitAddTaskForm);
+  }
+  if (els.addTaskCancelBtn){
+    els.addTaskCancelBtn.addEventListener('click', function(event){
+      event.preventDefault();
+      closeAddTaskModal();
+    });
+  }
+  if (els.addTaskCloseBtn){
+    els.addTaskCloseBtn.addEventListener('click', closeAddTaskModal);
+  }
+  if (els.addTaskModal){
+    els.addTaskModal.addEventListener('click', function(event){
+      if (event.target === els.addTaskModal){
+        closeAddTaskModal();
+      }
+    });
   }
 }
 
-// Rest of the utility functions (remain the same)
 function ensureLiffSdk(){
   if (typeof liff !== 'undefined') return Promise.resolve();
   if (document.getElementById('liff-sdk')){
@@ -384,7 +245,7 @@ function ensureLiffSdk(){
     script.src = 'https://static.line-scdn.net/liff/edge/2/sdk.js';
     script.async = true;
     script.onload = ()=> waitForLiffInstance(0).then(resolve).catch(reject);
-    script.onerror = ()=> reject(new Error('โหลด LIFF SDK ไม่สำเร็จ'));
+    script.onerror = ()=> reject(new Error('เนเธซเธฅเธ” LIFF SDK เนเธกเนเธชเธณเน€เธฃเนเธ'));
     document.head.appendChild(script);
   });
 }
@@ -450,12 +311,12 @@ function renderLoginBanner(){
   banner.innerHTML = `
     <div class="flex items-center justify-between space-x-3">
       <div>
-        <h2 class="text-base font-semibold text-gray-800">เข้าสู่ระบบผ่าน LINE</h2>
-        <p class="text-sm text-gray-500">ล็อกอินเพื่อดูรายละเอียดงานและอัปเดตสถานะ</p>
+        <h2 class="text-base font-semibold text-gray-800">เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE</h2>
+        <p class="text-sm text-gray-500">เธฅเนเธญเธเธญเธดเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”เธเธฒเธเนเธฅเธฐเธญเธฑเธเน€เธ”เธ•เธชเธ–เธฒเธเธฐ</p>
       </div>
       <button class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2" id="loginWithLineBtn">
         <span class="material-icons text-base">chat</span>
-        <span>เข้าสู่ระบบ</span>
+        <span>เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธ</span>
       </button>
     </div>
   `;
@@ -463,7 +324,7 @@ function renderLoginBanner(){
   if (loginBtn){
     loginBtn.addEventListener('click', ()=>{
       if (typeof liff === 'undefined'){
-        toastError('ไม่พบ LIFF SDK');
+        toastError('เนเธกเนเธเธ LIFF SDK');
         return;
       }
       liff.login({ redirectUri: window.location.href });
@@ -499,7 +360,7 @@ function toastInfo(message){
 function handleDataError(err, fallbackMessage){
   console.error('Data error:', err);
   if (err?.code === 'JSONP_NETWORK'){
-    toastError('ไม่สามารถเชื่อมต่อ Apps Script ได้ โปรดตรวจสอบว่าเว็บแอปเผยแพร่แบบ Anyone และ URL ถูกต้อง');
+    toastError('เนเธกเนเธชเธฒเธกเธฒเธฃเธ–เน€เธเธทเนเธญเธกเธ•เนเธญ Apps Script เนเธ”เน เนเธเธฃเธ”เธ•เธฃเธงเธเธชเธญเธเธงเนเธฒเน€เธงเนเธเนเธญเธเน€เธเธขเนเธเธฃเนเนเธเธ Anyone เนเธฅเธฐ URL เธ–เธนเธเธ•เนเธญเธ');
   } else {
     toastError(fallbackMessage);
   }
@@ -560,19 +421,21 @@ function loadUpcomingTasks(){
 function loadSecureData(){
   return Promise.all([
     fetchAllTasks(),
-    fetchUserStats()
-  ]).then(([tasksResult, stats])=>{
+    fetchUserStats(),
+    fetchActiveTeachers()
+  ]).then(([tasksResult, stats, teachers])=>{
     state.tasks = tasksResult.tasks || [];
     if (tasksResult.currentUser){
       state.currentUser = tasksResult.currentUser;
       state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
     }
     state.userStats = stats;
+    state.teachers = Array.isArray(teachers) ? teachers : [];
     renderTasks(state.tasks);
     renderUserStats(stats);
     updateAdminUI();
   }).catch(err=>{
-    handleDataError(err, 'ไม่สามารถโหลดข้อมูลแบบละเอียดได้');
+    handleDataError(err, 'เนเธกเนเธชเธฒเธกเธฒเธฃเธ–เนเธซเธฅเธ”เธเนเธญเธกเธนเธฅเนเธเธเธฅเธฐเน€เธญเธตเธขเธ”เนเธ”เน');
   });
 }
 
@@ -604,6 +467,22 @@ function fetchUserStats(){
       }
       return Array.isArray(res.data) ? res.data : [];
     });
+}
+
+function fetchActiveTeachers(){
+  return jsonpRequest({
+    action:'users',
+    idToken: state.profile?.idToken || ''
+  }).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'users error');
+    }
+    if (res.currentUser && !state.currentUser){
+      state.currentUser = res.currentUser;
+      state.isAdmin = String(state.currentUser.level || '').trim().toLowerCase() === 'admin';
+    }
+    return Array.isArray(res.data) ? res.data : [];
+  });
 }
 
 function renderDashboard(data){
@@ -660,7 +539,7 @@ function renderUpcomingTasks(list){
   if (!state.isLoggedIn){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-dashed border-blue-200 text-center text-sm text-gray-500">
-        เข้าสู่ระบบผ่าน LINE เพื่อดูรายละเอียดงานที่กำลังจะถึง
+        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE เน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”เธเธฒเธเธ—เธตเนเธเธณเธฅเธฑเธเธเธฐเธ–เธถเธ
       </div>
     `;
     return;
@@ -668,26 +547,25 @@ function renderUpcomingTasks(list){
   if (!list.length){
     els.taskCardsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ไม่พบงานที่กำลังจะถึงในช่วง ${state.upcomingDays} วัน
+        เนเธกเนเธเธเธเธฒเธเธ—เธตเนเธเธณเธฅเธฑเธเธเธฐเธ–เธถเธเนเธเธเนเธงเธ ${state.upcomingDays} เธงเธฑเธ
       </div>
     `;
     return;
   }
   const html = list.map(task=>{
-    const thaiDate = formatThaiDate(task.dueDate);
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
           <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${task.daysUntilDue==='0' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">
-            ${task.daysUntilDue==='0' ? 'วันนี้' : `อีก ${task.daysUntilDue} วัน`}
+            ${task.daysUntilDue==='0' ? 'เธงเธฑเธเธเธตเน' : `เธญเธตเธ ${task.daysUntilDue} เธงเธฑเธ`}
           </span>
         </div>
         <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee)}</p>
         <div class="flex items-center justify-between mt-3 text-sm text-gray-600">
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(thaiDate)}</span>
+            <span>${escapeHtml(task.dueDateThai || task.dueDate || '')}</span>
           </span>
           <span class="flex items-center space-x-1">
             <span class="material-icons text-base text-green-500">flag</span>
@@ -706,7 +584,7 @@ function renderTasks(tasks){
   if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
+        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธเธฒเธฃเธเธฒเธเธ—เธฑเนเธเธซเธกเธ”
       </div>
     `;
     return;
@@ -723,7 +601,7 @@ function applyTaskFilters(){
   if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
+        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธเธฒเธฃเธเธฒเธเธ—เธฑเนเธเธซเธกเธ”
       </div>
     `;
     return;
@@ -747,16 +625,20 @@ function applyTaskFilters(){
     return haystack.some(text => text.includes(search));
   });
 
-  // Sort tasks from newest to oldest (reverse chronological)
   filtered.sort((a,b)=>{
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
-    // Reverse order for newest first
-    if (db === da) return String(a.name || '').localeCompare(String(b.name || ''));
+    if (da === db) return String(a.name || '').localeCompare(String(b.name || ''));
     return db - da;
   });
 
   state.filteredTasks = filtered;
+  if (els.headerTotals.myTasks){
+    const totalMine = state.personalStats && typeof state.personalStats.totalTasks === 'number'
+      ? state.personalStats.totalTasks
+      : state.tasks.length;
+    setText(els.headerTotals.myTasks, totalMine);
+  }
   const totalPages = Math.max(1, Math.ceil(filtered.length / state.taskPagination.pageSize));
   state.taskPagination.totalPages = totalPages;
   if (state.taskPagination.page > totalPages){
@@ -771,7 +653,7 @@ function renderTaskList(){
   if (!state.isLoggedIn){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เข้าสู่ระบบเพื่อดูรายการงานทั้งหมด
+        เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธฃเธฒเธขเธเธฒเธฃเธเธฒเธเธ—เธฑเนเธเธซเธกเธ”
       </div>
     `;
     return;
@@ -779,7 +661,7 @@ function renderTaskList(){
   if (!state.filteredTasks.length){
     els.allTasksContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ไม่พบงานที่ตรงกับเงื่อนไขการค้นหา
+        เนเธกเนเธเธเธเธฒเธเธ—เธตเนเธ•เธฃเธเธเธฑเธเน€เธเธทเนเธญเธเนเธเธเธฒเธฃเธเนเธเธซเธฒ
       </div>
     `;
     return;
@@ -789,21 +671,21 @@ function renderTaskList(){
   const items = state.filteredTasks.slice(start, end);
   const html = items.map(task=>{
     const isCompleted = task.completed === 'Yes';
-    const statusLabel = task.status || (isCompleted ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
+    const statusLabel = task.status || (isCompleted ? 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เน' : 'เธฃเธญเธ”เธณเน€เธเธดเธเธเธฒเธฃ');
     const statusClass = isCompleted ? 'bg-green-100 text-green-600' : 'bg-yellow-100 text-yellow-600';
-    const thaiDate = formatThaiDate(task.dueDate);
+    const dueDisplay = toThaiDateLabel(task.dueDate, task.dueDateThai);
     const dueMeta = formatDueMeta_(task.dueDate);
     const buttonClass = isCompleted
       ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
       : 'bg-blue-600 hover:bg-blue-700 text-white';
-    const buttonLabel = isCompleted ? 'เสร็จสมบูรณ์แล้ว' : 'ทำเครื่องหมายว่าเสร็จ';
+    const buttonLabel = isCompleted ? 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เนเนเธฅเนเธง' : 'เธ—เธณเน€เธเธฃเธทเนเธญเธเธซเธกเธฒเธขเธงเนเธฒเน€เธชเธฃเนเธ';
     const disabledAttr = isCompleted ? 'disabled' : '';
     return `
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
           <div>
             <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
-            <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'ไม่มีผู้รับผิดชอบ')}</p>
+            <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'เนเธกเนเธกเธตเธเธนเนเธฃเธฑเธเธเธดเธ”เธเธญเธ')}</p>
           </div>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${statusClass}">
             ${escapeHtml(statusLabel)}
@@ -812,12 +694,12 @@ function renderTaskList(){
         <div class="mt-3 text-sm text-gray-600 space-y-1">
           <div class="flex items-center space-x-2">
             <span class="material-icons text-base text-blue-500">event</span>
-            <span>${escapeHtml(thaiDate)}</span>
+            <span>${escapeHtml(dueDisplay)}</span>
             <span class="text-xs text-gray-400">${escapeHtml(dueMeta)}</span>
           </div>
           <div class="flex items-center space-x-2 text-xs text-gray-500">
             <span class="material-icons text-base text-purple-500">link</span>
-            <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เปิดใน Asana</a>
+            <a href="${escapeAttr(task.link)}" target="_blank" class="text-blue-600 hover:underline">เน€เธเธดเธ”เนเธ Asana</a>
           </div>
         </div>
         <button class="mt-4 w-full ${buttonClass} py-2 rounded-lg text-sm font-medium flex items-center justify-center space-x-2 transition" data-action="update-status" data-task-id="${escapeAttr(task.id)}" ${disabledAttr}>
@@ -838,24 +720,209 @@ function renderTaskPagination(){
     wrapper.classList.toggle('hidden', shouldHide);
   }
   if (!state.filteredTasks.length){
-    els.taskPaginationInfo.textContent = 'ไม่มีงาน';
+    els.taskPaginationInfo.textContent = 'เนเธกเนเธกเธตเธเธฒเธ';
+function buildTeacherAvatar_(teacher){
+
+
+  if (!teacher) return 'https://ui-avatars.com/api/?name=K&background=2563eb&color=ffffff';
+
+
+  const src = teacher.lineAvatarThumb || teacher.linePictureUrl || teacher.picture;
+
+
+  if (src && String(src).trim()) return String(src).trim();
+
+
+  const fallbackName = (teacher.name || teacher.lineDisplayName || 'ครู').trim();
+
+
+  const initial = fallbackName ? fallbackName.charAt(0).toUpperCase() : 'K';
+
+
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(initial)}&background=2563eb&color=ffffff`;
+
+
+}
+
+
     if (els.taskPaginationPrev) els.taskPaginationPrev.disabled = true;
     if (els.taskPaginationNext) els.taskPaginationNext.disabled = true;
     return;
   }
   const totalPages = state.taskPagination.totalPages || 1;
   const currentPage = state.taskPagination.page || 1;
-  els.taskPaginationInfo.textContent = `หน้า ${currentPage}/${totalPages}`;
+  els.taskPaginationInfo.textContent = `เธซเธเนเธฒ ${currentPage}/${totalPages}`;
   if (els.taskPaginationPrev) els.taskPaginationPrev.disabled = currentPage <= 1;
   if (els.taskPaginationNext) els.taskPaginationNext.disabled = currentPage >= totalPages;
 }
 
+function renderUserStats(){
+  renderTeachers();
+}
+
+function renderTeachers(){
+  const container = els.teacherListContainer || els.userStatsContainer;
+  if (!container) return;
+  if (!state.isLoggedIn){
+    container.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
+        เข้าสู่ระบบเพื่อดูข้อมูลทีมครู
+      </div>
+    `;
+    return;
+  }
+  const activeTeachers = (state.teachers || []).filter(t => isActiveStatus(t.status));
+  if (!activeTeachers.length){
+    container.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
+        ยังไม่มีข้อมูลครูที่เปิดใช้งาน
+      </div>
+    `;
+    return;
+  }
+  const statsByEmail = new Map();
+  const statsByName = new Map();
+  (state.userStats || []).forEach(stat => {
+    const emailKey = normalizeEmail(stat.email);
+    if (emailKey) statsByEmail.set(emailKey, stat);
+    const nameKey = normalizeName(stat.assignee);
+    if (nameKey && !statsByName.has(nameKey)) statsByName.set(nameKey, stat);
+  });
+  const cards = activeTeachers.map(teacher => {
+    const emailKey = normalizeEmail(teacher.email || teacher.user);
+    const nameKey = normalizeName(teacher.name || teacher.lineDisplayName);
+    const stats = statsByEmail.get(emailKey) || statsByName.get(nameKey) || { totalTasks:0, completedTasks:0, pendingTasks:0, completionRate:0 };
+    const completion = stats.completionRate != null ? `${stats.completionRate}%` : '-';
+    const avatar = buildTeacherAvatar_(teacher);
+    const level = String(teacher.level || 'Teacher').trim();
+    const levelBadge = level ? `<span class="text-xs px-2 py-0.5 rounded-full ${level.toLowerCase()==='admin' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">${escapeHtml(level)}</span>` : '';
+    const phoneLine = teacher.phone ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-emerald-500">call</span><a href="tel:${escapeAttr(teacher.phone)}" class="hover:underline">${escapeHtml(teacher.phone)}</a></div>` : '';
+    const lineDisplay = teacher.lineDisplayName ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-lime-500">chat</span><span>${escapeHtml(teacher.lineDisplayName)}</span></div>` : '';
+    const lineUidRow = teacher.lineUID ? `<span class="flex items-center space-x-1"><span class="material-icons text-sm text-gray-300">badge</span><span>${escapeHtml(teacher.lineUID)}</span></span>` : '<span></span>';
+    return `
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col">
+        <div class="flex items-center space-x-3">
+          <img src="${escapeAttr(avatar)}" alt="${escapeAttr(teacher.name || 'ครู')}" class="w-14 h-14 rounded-full object-cover border-2 border-blue-100">
+          <div>
+            <div class="flex items-center space-x-2">
+              <p class="text-base font-semibold text-gray-800">${escapeHtml(teacher.name || teacher.lineDisplayName || 'ไม่ทราบชื่อ')}</p>
+              ${levelBadge}
+            </div>
+            <p class="text-xs text-gray-500">${escapeHtml(teacher.email || teacher.user || '')}</p>
+            ${lineDisplay || phoneLine ? `<div class="mt-1 space-y-1">${lineDisplay}${phoneLine}</div>` : ''}
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+          <div class="bg-blue-50 rounded-lg p-2">
+            <div class="text-xs text-blue-500">รวม</div>
+            <div class="text-lg font-semibold text-blue-700">${stats.totalTasks || 0}</div>
+          </div>
+          <div class="bg-emerald-50 rounded-lg p-2">
+            <div class="text-xs text-emerald-500">เสร็จ</div>
+            <div class="text-lg font-semibold text-emerald-600">${stats.completedTasks || 0}</div>
+          </div>
+          <div class="bg-amber-50 rounded-lg p-2">
+            <div class="text-xs text-amber-500">ค้าง</div>
+            <div class="text-lg font-semibold text-amber-600">${stats.pendingTasks || 0}</div>
+          </div>
+        </div>
+        <div class="mt-4 text-xs text-gray-500 flex items-center justify-between">
+          <span class="flex items-center space-x-1"><span class="material-icons text-sm text-purple-500">trending_up</span><span>สำเร็จ: ${completion}</span></span>
+          ${lineUidRow}
+        </div>
+      </div>
+    `;
+  }).join('');
+  container.innerHTML = `
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      ${cards}
+    </div>
+  `;
+}  const activeTeachers = (state.teachers || []).filter(t => isActiveStatus(t.status));
+  if (!activeTeachers.length){
+    container.innerHTML = `
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
+        เธขเธฑเธเนเธกเนเธกเธตเธเนเธญเธกเธนเธฅเธเธฃเธนเธ—เธตเนเน€เธเธดเธ”เนเธเนเธเธฒเธ
+      </div>
+    `;
+    return;
+  }
+  const statsByEmail = new Map();
+  (state.userStats || []).forEach(stat=>{
+    const key = String(stat.email || '').trim().toLowerCase();
+    if (key) statsByEmail.set(key, stat);
+  });
+  const cards = activeTeachers.map(teacher=>{
+    const email = String(teacher.email || teacher.user || '').trim().toLowerCase();
+    const stats = statsByEmail.get(email) || { totalTasks:0, completedTasks:0, pendingTasks:0, completionRate:0 };
+    const completion = stats.completionRate != null ? `${stats.completionRate}%` : '-';
+    const avatar = buildTeacherAvatar_(teacher);
+    const level = String(teacher.level || 'Teacher').trim();
+    const levelBadge = level ? `<span class="text-xs px-2 py-0.5 rounded-full ${level.toLowerCase()==='admin' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">${escapeHtml(level)}</span>` : '';
+    const phoneLine = teacher.phone ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-emerald-500">call</span><a href="tel:${escapeAttr(teacher.phone)}" class="hover:underline">${escapeHtml(teacher.phone)}</a></div>` : '';
+    const lineDisplay = teacher.lineDisplayName ? `<div class="flex items-center space-x-2 text-xs text-gray-500"><span class="material-icons text-base text-lime-500">chat</span><span>${escapeHtml(teacher.lineDisplayName)}</span></div>` : '';
+    const lineUidRow = teacher.lineUID ? `<span class="flex items-center space-x-1"><span class="material-icons text-sm text-gray-300">badge</span><span>${escapeHtml(teacher.lineUID)}</span></span>` : '<span></span>';
+    return `
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex flex-col">
+        <div class="flex items-center space-x-3">
+          <img src="${escapeAttr(avatar)}" alt="${escapeAttr(teacher.name || 'เธเธฃเธน')}" class="w-14 h-14 rounded-full object-cover border-2 border-blue-100">
+          <div>
+            <div class="flex items-center space-x-2">
+              <p class="text-base font-semibold text-gray-800">${escapeHtml(teacher.name || teacher.lineDisplayName || 'เนเธกเนเธ—เธฃเธฒเธเธเธทเนเธญ')}</p>
+              ${levelBadge}
+            </div>
+            <p class="text-xs text-gray-500">${escapeHtml(teacher.email || teacher.user || '')}</p>
+            ${lineDisplay || phoneLine ? `<div class="mt-1 space-y-1">${lineDisplay}${phoneLine}</div>` : ''}
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+          <div class="bg-blue-50 rounded-lg p-2">
+            <div class="text-xs text-blue-500">เธฃเธงเธก</div>
+            <div class="text-lg font-semibold text-blue-700">${stats.totalTasks || 0}</div>
+          </div>
+          <div class="bg-emerald-50 rounded-lg p-2">
+            <div class="text-xs text-emerald-500">เน€เธชเธฃเนเธ</div>
+            <div class="text-lg font-semibold text-emerald-600">${stats.completedTasks || 0}</div>
+          </div>
+          <div class="bg-amber-50 rounded-lg p-2">
+            <div class="text-xs text-amber-500">เธเนเธฒเธ</div>
+            <div class="text-lg font-semibold text-amber-600">${stats.pendingTasks || 0}</div>
+          </div>
+        </div>
+        <div class="mt-4 text-xs text-gray-500 flex items-center justify-between">
+          <span class="flex items-center space-x-1"><span class="material-icons text-sm text-purple-500">trending_up</span><span>เธชเธณเน€เธฃเนเธ: ${completion}</span></span>
+          ${lineUidRow}
+        </div>
+      </div>
+    `;
+  }).join('');
+  container.innerHTML = `
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      ${cards}
+    </div>
+  `;
+}
+
 function parseTaskDue_(value){
-  if (!value || value === 'No Due Date') return 0; // Changed to 0 for reverse sorting
-  const iso = `${value}T00:00:00+07:00`;
+  if (!value || value === 'No Due Date') return Number.MIN_SAFE_INTEGER;
+  const iso = value.includes('T') ? value : `${value}T00:00:00+07:00`;
   const date = new Date(iso);
-  if (isNaN(date)) return 0;
+  if (isNaN(date)) return Number.MIN_SAFE_INTEGER;
   return date.getTime();
+}
+
+function formatDueMeta_(dueDate){
+  if (!dueDate || dueDate === 'No Due Date') return '';
+  const iso = dueDate.includes('T') ? dueDate : `${dueDate}T00:00:00+07:00`;
+  const due = new Date(iso);
+  if (isNaN(due)) return '';
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  due.setHours(0,0,0,0);
+  const diff = Math.round((due - today)/(24*60*60*1000));
+  if (diff === 0) return 'เธเธฃเธเธเธณเธซเธเธ”เธงเธฑเธเธเธตเน';
+  if (diff > 0) return `เน€เธซเธฅเธทเธญเธญเธตเธ ${diff} เธงเธฑเธ`;
+  return `เน€เธเธดเธเธเธณเธซเธเธ” ${Math.abs(diff)} เธงเธฑเธ`;
 }
 
 function updateAdminUI(){
@@ -870,70 +937,21 @@ function updateAdminUI(){
 
 function showNotifications(){
   if (!state.isLoggedIn){
-    toastInfo('กรุณาเข้าสู่ระบบเพื่อดูการแจ้งเตือน');
+    toastInfo('เธเธฃเธธเธ“เธฒเน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเน€เธเธทเนเธญเธ”เธนเธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธ');
     return;
   }
   if (!state.notifications.length){
-    toastInfo('ยังไม่มีการแจ้งเตือนใหม่');
+    toastInfo('เธขเธฑเธเนเธกเนเธกเธตเธเธฒเธฃเนเธเนเธเน€เธ•เธทเธญเธเนเธซเธกเน');
     return;
   }
   const lines = state.notifications.slice(0, 5).map(task=>{
-    const thaiDate = formatThaiDate(task.dueDate);
+    const due = task.dueDateThai || task.dueDate || 'เนเธกเนเธกเธตเธงเธฑเธเธเธฃเธเธเธณเธซเธเธ”';
     const meta = formatDueMeta_(task.dueDate);
-    return `• ${task.name} (${thaiDate}${meta ? ' '+meta : ''})`;
+    return `โ€ข ${task.name} (${due}${meta ? ' โ€ข '+meta : ''})`;
   });
   const remaining = state.notifications.length - lines.length;
-  const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
-  alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
-}
-
-function renderUserStats(stats){
-  if (!els.userStatsContainer) return;
-  if (!state.isLoggedIn){
-    els.userStatsContainer.innerHTML = `
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-blue-200 text-center text-sm text-gray-500">
-        เข้าสู่ระบบเพื่อดูสถิติรายบุคคล
-      </div>
-    `;
-    return;
-  }
-  // Filter only Active users if available
-  const activeStats = stats.filter(row => {
-    // Check if user has tasks (active users will have tasks)
-    return row.totalTasks > 0;
-  });
-  
-  if (!activeStats.length){
-    els.userStatsContainer.innerHTML = `
-      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
-        ไม่มีสถิติผู้ใช้ที่ Active
-      </div>
-    `;
-    return;
-  }
-  const html = activeStats.map((row, index)=>{
-    const completionClass = row.completionRate >= 80 ? 'text-green-600' : 
-                           row.completionRate >= 50 ? 'text-yellow-600' : 'text-red-600';
-    return `
-    <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-bold">
-          ${index+1}
-        </div>
-        <div>
-          <p class="text-sm font-semibold text-gray-800">${escapeHtml(row.assignee || 'ไม่ทราบชื่อ')}</p>
-          <p class="text-xs text-gray-500">${escapeHtml(row.email || 'ไม่มีอีเมล')}</p>
-        </div>
-      </div>
-      <div class="flex flex-col sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
-        <span>งานทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
-        <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
-        <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
-        <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
-      </div>
-    </div>
-  `}).join('');
-  els.userStatsContainer.innerHTML = html;
+  const message = lines.join('\n') + (remaining > 0 ? `\nโ€ฆ เนเธฅเธฐเธญเธตเธ ${remaining} เธเธฒเธ` : '');
+  alert(`เธเธฒเธเธ—เธตเนเธเธณเธฅเธฑเธเธเธฐเธ–เธถเธเธเธณเธซเธเธ”:\n${message}`);
 }
 
 function renderProfilePage(){
@@ -952,10 +970,10 @@ function renderProfilePage(){
             KB
           </div>
           <h2 class="text-xl font-bold text-gray-800 mt-4">KruBoard</h2>
-          <p class="text-sm text-gray-500 mt-1">เข้าสู่ระบบด้วย LINE เพื่อจัดการงาน</p>
+          <p class="text-sm text-gray-500 mt-1">เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธ”เนเธงเธข LINE เน€เธเธทเนเธญเธเธฑเธ”เธเธฒเธฃเธเธฒเธ</p>
           <button class="mt-6 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center space-x-2 mx-auto" id="profileLoginBtn">
             <span class="material-icons text-base">chat</span>
-            <span>เข้าสู่ระบบผ่าน LINE</span>
+            <span>เน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธฒเธ LINE</span>
           </button>
         </div>
       </div>
@@ -964,7 +982,7 @@ function renderProfilePage(){
     if (loginBtn){
       loginBtn.addEventListener('click', ()=>{
         if (typeof liff === 'undefined'){
-          toastError('ไม่พบ LIFF SDK');
+          toastError('เนเธกเนเธเธ LIFF SDK');
           return;
         }
         liff.login({ redirectUri: window.location.href });
@@ -974,16 +992,16 @@ function renderProfilePage(){
   }
   const profile = state.profile;
   const userRecord = state.currentUser || {};
-  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'Teacher');
+  const roleLabel = userRecord.level ? String(userRecord.level) : (state.isAdmin ? 'Admin' : 'เธเธฃเธน');
   const lineUidLabel = userRecord.lineUID ? `LINE UID: ${userRecord.lineUID}` : '';
   els.profilePage.innerHTML = `
     <div class="bg-white rounded-2xl shadow-md p-6 mb-4">
       <div class="flex items-center space-x-4 mb-6">
         <img src="${escapeAttr(profile.pictureUrl || 'https://via.placeholder.com/100x100.png?text=LINE')}" alt="avatar" class="w-20 h-20 rounded-full object-cover border-4 border-blue-100">
         <div>
-          <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'ผู้ใช้งาน')}</h2>
+          <h2 class="text-xl font-bold text-gray-800">${escapeHtml(profile.name || 'เธเธนเนเนเธเนเธเธฒเธ')}</h2>
           <p class="text-xs text-gray-500">${escapeHtml(profile.email || profile.userId || '')}</p>
-          <p class="text-xs text-emerald-600 font-semibold mt-1">บทบาท: ${escapeHtml(roleLabel)}</p>
+          <p class="text-xs text-emerald-600 font-semibold mt-1">เธเธ—เธเธฒเธ—: ${escapeHtml(roleLabel)}</p>
           ${lineUidLabel ? `<p class="text-xs text-gray-400">${escapeHtml(lineUidLabel)}</p>` : ''}
           <p class="text-xs text-gray-400 mt-1">${escapeHtml(profile.statusMessage || '')}</p>
         </div>
@@ -992,14 +1010,14 @@ function renderProfilePage(){
         <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition" id="btnSetApiKey">
           <div class="flex items-center space-x-3">
             <span class="material-icons text-gray-600">vpn_key</span>
-            <span class="text-gray-800">ตั้งค่า API Key (ผู้ดูแลระบบ)</span>
+            <span class="text-gray-800">เธ•เธฑเนเธเธเนเธฒ API Key (เธเธนเนเธ”เธนเนเธฅเธฃเธฐเธเธ)</span>
           </div>
           <span class="material-icons text-gray-400">chevron_right</span>
         </button>
         <button class="w-full flex items-center justify-between p-4 hover:bg-gray-50 rounded-lg transition" id="btnRefreshData">
           <div class="flex items-center space-x-3">
             <span class="material-icons text-gray-600">sync</span>
-            <span class="text-gray-800">รีเฟรชข้อมูล</span>
+            <span class="text-gray-800">เธฃเธตเน€เธเธฃเธเธเนเธญเธกเธนเธฅ</span>
           </div>
           <span class="material-icons text-gray-400">chevron_right</span>
         </button>
@@ -1007,14 +1025,14 @@ function renderProfilePage(){
     </div>
     <button class="w-full bg-red-50 text-red-600 p-4 rounded-xl font-medium hover:bg-red-100 transition flex items-center justify-center space-x-2" id="logoutBtn">
       <span class="material-icons">logout</span>
-      <span>ออกจากระบบ</span>
+      <span>เธญเธญเธเธเธฒเธเธฃเธฐเธเธ</span>
     </button>
   `;
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn){
     logoutBtn.addEventListener('click', ()=>{
       if (typeof liff === 'undefined'){
-        toastError('ไม่พบ LIFF SDK');
+        toastError('เนเธกเนเธเธ LIFF SDK');
         return;
       }
       liff.logout();
@@ -1031,18 +1049,18 @@ function renderProfilePage(){
       btnSetApiKey.classList.remove('hidden');
     }
     btnSetApiKey.addEventListener('click', ()=>{
-      const current = state.apiKey ? '*** ตั้งค่าแล้ว ***' : 'ยังไม่ได้ตั้งค่า';
-      const input = prompt(`กรอกรหัส API KEY สำหรับแก้ไขสถานะ\nสถานะปัจจุบัน: ${current}`);
+      const current = state.apiKey ? '*** เธ•เธฑเนเธเธเนเธฒเนเธฅเนเธง ***' : 'เธขเธฑเธเนเธกเนเนเธ”เนเธ•เธฑเนเธเธเนเธฒ';
+      const input = prompt(`เธเธฃเธญเธเธฃเธซเธฑเธช API KEY เธชเธณเธซเธฃเธฑเธเนเธเนเนเธเธชเธ–เธฒเธเธฐ\nเธชเธ–เธฒเธเธฐเธเธฑเธเธเธธเธเธฑเธ: ${current}`);
       if (input !== null){
         const trimmed = input.trim();
         if (trimmed){
           state.apiKey = trimmed;
           localStorage.setItem('kruboard_api_key', trimmed);
-          toastInfo('บันทึก API Key สำเร็จ');
+          toastInfo('เธเธฑเธเธ—เธถเธ API Key เธชเธณเน€เธฃเนเธ');
         } else {
           state.apiKey = '';
           localStorage.removeItem('kruboard_api_key');
-          toastInfo('ลบ API Key แล้ว');
+          toastInfo('เธฅเธ API Key เนเธฅเนเธง');
         }
       }
     });
@@ -1060,110 +1078,64 @@ function renderProfilePage(){
 
 function handleUpdateStatus(taskId){
   if (!state.isLoggedIn){
-    toastInfo('ต้องเข้าสู่ระบบก่อน');
+    toastInfo('เธ•เนเธญเธเน€เธเนเธฒเธชเธนเนเธฃเธฐเธเธเธเนเธญเธ');
     return;
   }
   const task = state.tasks.find(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
   if (!task){
-    toastInfo('ไม่พบงานที่เลือก');
+    toastInfo('เนเธกเนเธเธเธเธฒเธเธ—เธตเนเน€เธฅเธทเธญเธ');
     return;
   }
   if (task.completed === 'Yes'){
-    toastInfo('งานนี้ทำเสร็จแล้ว');
+    toastInfo('เธเธฒเธเธเธตเนเธ—เธณเน€เธชเธฃเนเธเนเธฅเนเธง');
     return;
   }
-  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
-  const confirmDone = confirm(`ยืนยันทำเครื่องหมายว่างาน "${task.name}" เสร็จสมบูรณ์หรือไม่?\nสถานะปัจจุบัน: ${currentStatus}`);
+  const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เน' : 'เธฃเธญเธ”เธณเน€เธเธดเธเธเธฒเธฃ');
+  const confirmDone = confirm(`เธขเธทเธเธขเธฑเธเธ—เธณเน€เธเธฃเธทเนเธญเธเธซเธกเธฒเธขเธงเนเธฒเธเธฒเธ "${task.name}" เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เนเธซเธฃเธทเธญเนเธกเน?\nเธชเธ–เธฒเธเธฐเธเธฑเธเธเธธเธเธฑเธ: ${currentStatus}`);
   if (!confirmDone) return;
   showLoading(true);
   jsonpRequest({
     action: 'update_status',
     taskId,
-    status: 'เสร็จสมบูรณ์',
+    status: 'เน€เธชเธฃเนเธเธชเธกเธเธนเธฃเธ“เน',
     idToken: state.profile?.idToken || ''
   }).then(res=>{
     if (!res || res.success === false){
       throw new Error(res?.message || 'update failed');
     }
-    toastInfo('อัปเดตสถานะเรียบร้อย');
+    toastInfo('เธญเธฑเธเน€เธ”เธ•เธชเธ–เธฒเธเธฐเน€เธฃเธตเธขเธเธฃเนเธญเธข');
     return Promise.all([loadSecureData(), loadPublicData()]);
   }).catch(err=>{
-    handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
+    handleDataError(err, 'เธญเธฑเธเน€เธ”เธ•เธชเธ–เธฒเธเธฐเนเธกเนเธชเธณเน€เธฃเนเธ');
   }).finally(()=> showLoading(false));
 }
-
-function jsonpRequest(params, retryCount = 0){
-  const maxRetries = 2;
-  const baseTimeout = 30000; // 30 seconds base timeout
-  
+function jsonpRequest(params){
   return new Promise((resolve, reject)=>{
     const callbackName = `jsonp_cb_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const query = new URLSearchParams({ ...(params || {}), callback: callbackName });
     const script = document.createElement('script');
     script.src = `${APP_CONFIG.scriptUrl}?${query.toString()}`;
-    
-    let timeoutId = null;
-    let isResolved = false;
-    
-    // Set timeout with exponential backoff
-    const timeout = baseTimeout * Math.pow(1.5, retryCount);
-    timeoutId = setTimeout(()=>{
-      if (!isResolved){
-        cleanup();
-        if (retryCount < maxRetries){
-          console.log(`JSONP timeout, retrying... (attempt ${retryCount + 2}/${maxRetries + 1})`);
-          jsonpRequest(params, retryCount + 1)
-            .then(resolve)
-            .catch(reject);
-        } else {
-          reject(new Error('JSONP timeout after retries'));
-        }
-      }
-    }, timeout);
-    
+    let timeoutId = setTimeout(()=>{
+      cleanup();
+      reject(new Error('JSONP timeout'));
+    }, 15000);
     function cleanup(){
-      if (timeoutId){
-        clearTimeout(timeoutId);
-        timeoutId = null;
+      clearTimeout(timeoutId);
+      delete window[callbackName];
+      if (script.parentNode){
+        script.parentNode.removeChild(script);
       }
-      // Delay cleanup to allow late responses
-      setTimeout(()=>{
-        if (window[callbackName]){
-          delete window[callbackName];
-        }
-        if (script.parentNode){
-          script.parentNode.removeChild(script);
-        }
-      }, 1000);
     }
-    
-    // Set up callback
     window[callbackName] = data=>{
-      if (!isResolved){
-        isResolved = true;
-        cleanup();
-        resolve(data);
-      }
+      cleanup();
+      resolve(data);
     };
-    
     script.onerror = ()=>{
-      if (!isResolved){
-        isResolved = true;
-        cleanup();
-        if (retryCount < maxRetries){
-          console.log(`JSONP network error, retrying... (attempt ${retryCount + 2}/${maxRetries + 1})`);
-          jsonpRequest(params, retryCount + 1)
-            .then(resolve)
-            .catch(reject);
-        } else {
-          const err = new Error('JSONP network error after retries');
-          err.code = 'JSONP_NETWORK';
-          reject(err);
-        }
-      }
+      cleanup();
+      const err = new Error('JSONP network error');
+      err.code = 'JSONP_NETWORK';
+      reject(err);
     };
-    
-    // Add script to document
     document.body.appendChild(script);
   });
 }
@@ -1186,4 +1158,126 @@ function escapeHtml(value){
 function escapeAttr(value){
   if (value == null) return '';
   return String(value).replace(/"/g, '&quot;');
+}
+  const normalized = normalizeStatus(value);
+  return normalized === ''active'' || normalized === ''เปิดใช้งาน'' || normalized === ''ใช้งาน'';
+}
+
+
+
+
+
+  const normalized = normalizeStatus(value);
+  return normalized === 'active' || normalized === 'เปิดใช้งาน' || normalized === 'ใช้งาน';
+}
+  const normalized = normalizeStatus(value);
+  return normalized === 'active' || normalized === 'เปิดใช้งาน' || normalized === 'ใช้งาน';
+}
+
+function openAddTaskModal(){
+  if (!state.isAdmin){
+    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
+    return;
+  }
+  populateAssigneeOptions();
+  resetAddTaskForm();
+  if (!els.addTaskModal) return;
+  els.addTaskModal.classList.remove('hidden');
+  els.addTaskModal.classList.add('flex');
+}
+
+function closeAddTaskModal(){
+  if (!els.addTaskModal) return;
+  els.addTaskModal.classList.add('hidden');
+  els.addTaskModal.classList.remove('flex');
+}
+
+function resetAddTaskForm(){
+  if (els.addTaskForm){
+    els.addTaskForm.reset();
+  }
+}
+
+function populateAssigneeOptions(){
+  if (!els.addTaskAssignee) return;
+  const teachers = (state.teachers || []).filter(t => isActiveStatus(t.status));
+  const options = ['<option value="">เลือกผู้รับผิดชอบ</option>'];
+  teachers.sort((a,b)=> String(a.name || '').localeCompare(String(b.name || '')));
+  if (!teachers.length){
+    options.push('<option value="">(ยังไม่มีรายชื่อครูในระบบ)</option>');
+  }
+  teachers.forEach(teacher=>{
+    const email = (teacher.email || teacher.user || '').trim();
+    const label = teacher.name || teacher.lineDisplayName || email || 'ไม่ทราบชื่อ';
+    const safeEmail = escapeAttr(email);
+    const safeLabel = escapeHtml(label);
+    options.push(`<option value="${safeEmail}">${safeLabel}</option>`);
+  });
+  els.addTaskAssignee.innerHTML = options.join('');
+}
+
+function submitAddTaskForm(event){
+  event.preventDefault();
+  if (!state.isAdmin){
+    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
+    return;
+  }
+  const name = (els.addTaskName?.value || '').trim();
+  if (!name){
+    toastInfo('กรุณากรอกชื่องาน');
+    return;
+  }
+  const assigneeEmail = (els.addTaskAssignee?.value || '').trim();
+  const dueDate = (els.addTaskDueDate?.value || '').trim();
+  const notes = (els.addTaskNotes?.value || '').trim();
+  showLoading(true);
+  jsonpRequest({
+    action:'asana_create_task',
+    name,
+    assigneeEmail,
+    dueDate,
+    notes,
+    idToken: state.profile?.idToken || '',
+    pass: state.apiKey || ''
+  }).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'create task error');
+    }
+    toastInfo('สร้างงานใหม่สำเร็จ');
+    closeAddTaskModal();
+    return Promise.all([loadSecureData(), loadPublicData()]);
+  }).catch(err=>{
+    handleDataError(err, 'ไม่สามารถสร้างงานใหม่ได้');
+  }).finally(()=> showLoading(false));
+}
+
+function toThaiDateLabel(value, fallbackThai){
+  if (fallbackThai && fallbackThai !== 'No Due Date') return fallbackThai;
+  if (!value || value === 'No Due Date') return 'ไม่มีวันครบกำหนด';
+  const iso = value.includes('T') ? value : `${value}T00:00:00+07:00`;
+  const date = new Date(iso);
+  if (isNaN(date)) return fallbackThai || value;
+  return `${date.getDate()} ${THAI_MONTHS[date.getMonth()]} ${date.getFullYear()+543}`;
+}
+
+function normalizeStatus(value){
+  return String(value || '').trim().toLowerCase();
+}
+
+function isActiveStatus(value){
+  const normalized = normalizeStatus(value);
+  return normalized === 'active' || normalized === 'เปิดใช้งาน' || normalized === 'ใช้งาน';
+}
+
+
+
+
+
+
+function normalizeEmail(value){
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeName(value){
+  return String(value || '').trim().toLowerCase();
 }

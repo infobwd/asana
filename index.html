@@ -468,7 +468,82 @@
     <div class="loading"></div>
     <span class="text-sm font-medium text-gray-700">กำลังโหลดข้อมูล...</span>
   </div>
+<!-- Task Modal -->
+<div id="taskModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-bold text-gray-800">เพิ่มงานใหม่</h3>
+          <button id="closeModalBtn" class="p-2 hover:bg-gray-100 rounded-lg transition">
+            <span class="material-icons text-gray-500">close</span>
+          </button>
+        </div>
+      </div>
+      
+      <form id="taskForm" class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            ชื่องาน <span class="text-red-500">*</span>
+          </label>
+          <input type="text" id="taskName" required
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="เช่น จัดทำรายงานประจำเดือน">
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            อีเมลผู้รับผิดชอบ
+          </label>
+          <input type="email" id="taskAssignee"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="example@school.ac.th">
+          <p class="text-xs text-gray-500 mt-1">ปล่อยว่างได้หากยังไม่กำหนดผู้รับผิดชอบ</p>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            วันที่ครบกำหนด
+          </label>
+          <input type="date" id="taskDueDate"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <p class="text-xs text-gray-500 mt-1">ปล่อยว่างได้หากไม่มีกำหนดส่ง</p>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">
+            รายละเอียดงาน
+          </label>
+          <textarea id="taskNotes" rows="4"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder="อธิบายรายละเอียดเพิ่มเติม..."></textarea>
+        </div>
+        
+        <div class="flex space-x-3 pt-4">
+          <button type="submit" id="submitTaskBtn"
+            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition flex items-center justify-center space-x-2">
+            <span class="material-icons text-base">add_task</span>
+            <span>เพิ่มงาน</span>
+          </button>
+          <button type="button" id="cancelModalBtn"
+            class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-lg font-medium transition">
+            ยกเลิก
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
+<!-- Loading Overlay for Modal -->
+<div id="modalLoading" class="fixed inset-0 bg-black bg-opacity-50 z-60 hidden">
+  <div class="flex items-center justify-center min-h-screen">
+    <div class="bg-white rounded-xl px-8 py-6 shadow-xl flex items-center space-x-4">
+      <div class="loading"></div>
+      <span class="text-gray-700 font-medium">กำลังเพิ่มงาน...</span>
+    </div>
+  </div>
+</div>
   <!-- App Script -->
   <script src="app.js"></script>
 

@@ -1,4 +1,4 @@
-/* KruBoard front-end (GitHub hosted) - Updated Version (with patches) */
+/* KruBoard front-end (GitHub hosted) - Updated Version */
 const APP_CONFIG = {
   scriptUrl: 'https://script.google.com/macros/s/AKfycbwSGyuR6e3OB2T2e4HJ59KqHwvvwp6BFoNjN-SLj0es4M9iWhrsm2AJbFeNjc8PEhZYuA/exec',
   liffId: '2006490627-3NpRPl0G'
@@ -26,29 +26,6 @@ const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
-
-// === Patches: debounce/throttle + session cache ===
-function debounce(fn, wait=200){
-  let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args), wait); };
-}
-function throttle(fn, wait=200){
-  let last=0; return (...args)=>{ const now=Date.now(); if(now-last>=wait){ last=now; fn(...args); } };
-}
-const cache = {
-  get(key){
-    try{
-      const raw = sessionStorage.getItem(`kb:${key}`);
-      if(!raw) return null;
-      const {exp, val} = JSON.parse(raw);
-      if(exp && Date.now()>exp){ sessionStorage.removeItem(`kb:${key}`); return null; }
-      return val;
-    }catch{ return null; }
-  },
-  set(key, val, ttlMs=60_000){
-    try{ sessionStorage.setItem(`kb:${key}`, JSON.stringify({exp: Date.now()+ttlMs, val})); }catch{}
-  },
-  del(key){ try{ sessionStorage.removeItem(`kb:${key}`);}catch{} }
-};
 
 const els = {
   navItems: [],
@@ -143,11 +120,23 @@ function initModalElements(){
   els.taskDueDateInput = document.getElementById('taskDueDate');
   els.taskNotesInput = document.getElementById('taskNotes');
   
-  if (els.closeModalBtn){ els.closeModalBtn.addEventListener('click', closeTaskModal); }
-  if (els.cancelModalBtn){ els.cancelModalBtn.addEventListener('click', closeTaskModal); }
-  if (els.taskForm){ els.taskForm.addEventListener('submit', handleTaskFormSubmit); }
+  // Bind modal events
+  if (els.closeModalBtn){
+    els.closeModalBtn.addEventListener('click', closeTaskModal);
+  }
+  if (els.cancelModalBtn){
+    els.cancelModalBtn.addEventListener('click', closeTaskModal);
+  }
+  if (els.taskForm){
+    els.taskForm.addEventListener('submit', handleTaskFormSubmit);
+  }
+  // Close modal on outside click
   if (els.taskModal){
-    els.taskModal.addEventListener('click', (evt)=>{ if (evt.target === els.taskModal){ closeTaskModal(); } });
+    els.taskModal.addEventListener('click', (evt)=>{
+      if (evt.target === els.taskModal){
+        closeTaskModal();
+      }
+    });
   }
 }
 
@@ -155,7 +144,11 @@ function openTaskModal(){
   if (!els.taskModal) return;
   els.taskModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-  if (els.taskForm){ els.taskForm.reset(); }
+  // Reset form
+  if (els.taskForm){
+    els.taskForm.reset();
+  }
+  // Set today as minimum date
   if (els.taskDueDateInput){
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -166,35 +159,59 @@ function openTaskModal(){
 }
 
 function closeTaskModal(){
-  if (els.taskModal){ els.taskModal.classList.add('hidden'); }
+  if (els.taskModal){
+    els.taskModal.classList.add('hidden');
+  }
   document.body.style.overflow = '';
 }
 
 function showModalLoading(show){
-  if (els.modalLoading){ els.modalLoading.classList.toggle('hidden', !show); }
+  if (els.modalLoading){
+    els.modalLoading.classList.toggle('hidden', !show);
+  }
 }
 
 async function handleTaskFormSubmit(evt){
   evt.preventDefault();
-  if (!state.isLoggedIn){ return toastInfo('กรุณาเข้าสู่ระบบก่อน'); }
-  if (!state.isAdmin){ return toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ'); }
+  
+  if (!state.isLoggedIn){
+    toastInfo('กรุณาเข้าสู่ระบบก่อน');
+    return;
+  }
+  
+  if (!state.isAdmin){
+    toastInfo('ฟีเจอร์นี้สำหรับผู้ดูแลระบบ');
+    return;
+  }
   
   const name = (els.taskNameInput?.value || '').trim();
   const assigneeEmail = (els.taskAssigneeInput?.value || '').trim();
   const dueDate = (els.taskDueDateInput?.value || '').trim();
   const notes = (els.taskNotesInput?.value || '').trim();
-  if (!name){ return toastInfo('กรุณากรอกชื่องาน'); }
+  
+  if (!name){
+    toastInfo('กรุณากรอกชื่องาน');
+    return;
+  }
   
   showModalLoading(true);
   closeTaskModal();
+  
   try{
     const res = await jsonpRequest({
       action:'asana_create_task',
-      name, assigneeEmail, dueDate, notes,
+      name,
+      assigneeEmail,
+      dueDate,
+      notes,
       idToken: state.profile?.idToken || '',
       pass: state.apiKey || ''
     });
-    if (!res || res.success === false){ throw new Error(res?.message || 'create task error'); }
+    
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'create task error');
+    }
+    
     toastInfo('สร้างงานใหม่สำเร็จ');
     await Promise.all([loadSecureData(), loadPublicData()]);
   }catch(err){
@@ -206,13 +223,20 @@ async function handleTaskFormSubmit(evt){
 
 function formatThaiDate(dateString){
   if (!dateString || dateString === 'No Due Date') return 'ไม่มีวันครบกำหนด';
+  
   let date;
-  if (dateString instanceof Date){ date = dateString; }
-  else { date = new Date(dateString + 'T00:00:00+07:00'); }
+  if (dateString instanceof Date){
+    date = dateString;
+  } else {
+    date = new Date(dateString + 'T00:00:00+07:00');
+  }
+  
   if (isNaN(date)) return dateString;
+  
   const day = date.getDate();
   const month = THAI_MONTHS[date.getMonth()];
   const year = date.getFullYear() + 543;
+  
   return `${day} ${month} ${year}`;
 }
 
@@ -225,6 +249,7 @@ function formatDueMeta_(dueDate){
   today.setHours(0,0,0,0);
   due.setHours(0,0,0,0);
   const diff = Math.round((due - today)/(24*60*60*1000));
+  
   if (diff === 0) return '(ครบกำหนดวันนี้)';
   if (diff === 1) return '(พรุ่งนี้)';
   if (diff === -1) return '(เมื่อวาน)';
@@ -236,13 +261,17 @@ function formatDueMeta_(dueDate){
 
 function cachePages(){
   const pages = Array.from(document.querySelectorAll('.page'));
-  pages.forEach(page => { els.pages[page.id] = page; });
+  pages.forEach(page => {
+    els.pages[page.id] = page;
+  });
   els.homePage = els.pages.homePage;
   els.tasksPage = els.pages.tasksPage;
   els.teachersPage = els.pages.teachersPage;
   els.profilePage = els.pages.profilePage;
   els.navItems = els.nav;
-  if (!els.homePage){ console.warn('homePage not found – layout may be outdated'); }
+  if (!els.homePage){
+    console.warn('homePage not found – layout may be outdated');
+  }
 }
 
 function bindUI(){
@@ -260,9 +289,6 @@ function bindUI(){
 
   if (els.refreshBtn){
     els.refreshBtn.addEventListener('click', ()=>{
-      // clear short caches
-      cache.del('dash:me'); cache.del('dash:pub');
-      cache.del('upcoming:me'); cache.del('upcoming:pub');
       showLoading(true);
       const target = state.isLoggedIn ? loadSecureData() : Promise.resolve();
       Promise.all([loadPublicData(), target])
@@ -306,12 +332,11 @@ function bindUI(){
   }
 
   if (els.taskSearchInput){
-    const onSearch = debounce(()=>{
+    els.taskSearchInput.addEventListener('input', ()=>{
       state.taskFilters.search = els.taskSearchInput.value.trim();
       state.taskPagination.page = 1;
       applyTaskFilters();
-    }, 200);
-    els.taskSearchInput.addEventListener('input', onSearch);
+    });
   }
 
   if (els.taskStatusFilter){
@@ -488,12 +513,7 @@ async function loadPublicData(){
   await upcomingPromise;
 }
 
-// Replaced: fetchDashboardStats with caching
 function fetchDashboardStats(){
-  const cacheKey = state.isLoggedIn ? 'dash:me' : 'dash:pub';
-  const cached = cache.get(cacheKey);
-  if(cached){ return Promise.resolve(cached); }
-
   const payload = { action:'dashboard' };
   if (state.isLoggedIn && state.profile?.idToken){
     payload.idToken = state.profile.idToken;
@@ -503,9 +523,7 @@ function fetchDashboardStats(){
       if (!res || res.success === false){
         throw new Error(res?.message || 'dashboard error');
       }
-      const data = res.data || {};
-      cache.set(cacheKey, data, 30_000);
-      return data;
+      return res.data || {};
     });
 }
 
@@ -530,8 +548,6 @@ function loadUpcomingTasks(){
       state.notifications = personal ? data : [];
       setText(els.notificationCount, personal ? (data.length || 0) : 0);
       renderUpcomingTasks(data);
-      // cache short
-      cache.set(personal ? 'upcoming:me' : 'upcoming:pub', data, 20_000);
       return data;
     })
     .catch(err=>{
@@ -604,7 +620,9 @@ function renderDashboard(data){
   setText(els.stats.completionRate, completion);
 
   state.personalStats = data?.personal || null;
-  if (data?.currentUser){ state.currentUser = data.currentUser; }
+  if (data?.currentUser){
+    state.currentUser = data.currentUser;
+  }
   state.isAdmin = state.currentUser ? String(state.currentUser.level || '').trim().toLowerCase() === 'admin' : state.isAdmin;
   updateAdminUI();
 
@@ -628,78 +646,16 @@ function renderDashboard(data){
     setText(els.headerTotals.myTasks, state.isLoggedIn ? '0' : '-');
     setText(els.headerTotals.myUpcoming, state.isLoggedIn ? '0' : '-');
   }
-
-  // NEW: inject motivation panel
-  ensureMotivationPanel();
-}
-
-function ensureMotivationPanel(){
-  if(!els.homePage) return;
-  let box = document.getElementById('motivationPanel');
-  if(!box){
-    box = document.createElement('div');
-    box.id = 'motivationPanel';
-    box.className = 'bg-white rounded-2xl shadow-sm border border-blue-100 p-4 mb-4';
-    els.homePage.insertBefore(box, els.homePage.firstChild?.nextSibling || els.homePage.firstChild);
-  }
-  const me = state.personalStats;
-  const streak = calcStreak_(me);
-  const overload = calcOverload_(me);
-  const tip = pickCoachTip_(me);
-
-  box.innerHTML = `
-    <div class="flex items-start justify-between">
-      <div>
-        <h3 class="text-base font-semibold text-gray-800">กำลังใจวันนี้ 🎉</h3>
-        <p class="text-sm text-gray-600 mt-1">${escapeHtml(tip)}</p>
-      </div>
-      <div class="text-right">
-        <div class="text-xs text-gray-500">สตรีคทำงานสำเร็จ</div>
-        <div class="text-2xl font-bold ${streak>=3?'text-emerald-600':'text-gray-800'}">${streak} วัน</div>
-      </div>
-    </div>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div class="rounded-xl border p-3 ${overload.level==='low'?'border-emerald-200 bg-emerald-50': overload.level==='mid'?'border-amber-200 bg-amber-50':'border-rose-200 bg-rose-50'}">
-        <div class="text-xs text-gray-600">ภาระงานรอดำเนินการ</div>
-        <div class="text-lg font-bold">${(me?.pendingTasks)||0} งาน</div>
-        <div class="text-xs ${overload.level==='high'?'text-rose-700':'text-gray-500'}">${escapeHtml(overload.note)}</div>
-      </div>
-      <div class="rounded-xl border p-3 border-blue-200 bg-blue-50">
-        <div class="text-xs text-gray-600">งานใกล้ครบกำหนด (7 วัน)</div>
-        <div class="text-lg font-bold">${me?.upcomingTasks||0} งาน</div>
-        <button id="btnSeeUpcoming" class="mt-2 text-xs text-blue-700 underline">ดูรายละเอียด</button>
-      </div>
-    </div>
-  `;
-  const btn = document.getElementById('btnSeeUpcoming');
-  if(btn){ btn.addEventListener('click', ()=> switchPage('homePage')); }
-}
-function calcStreak_(me){
-  if(!me) return 0;
-  return Number(me.streakDays || me.completedTasksThisWeek || 0);
-}
-function calcOverload_(me){
-  const pending = Number(me?.pendingTasks||0);
-  const upc = Number(me?.upcomingTasks||0);
-  const score = pending + upc*1.5;
-  if(score>=15) return {level:'high', note:'ภาระงานค่อนข้างสูง ควรโฟกัสงานที่ครบกำหนดภายใน 48 ชม.'};
-  if(score>=8)  return {level:'mid',  note:'ภาระงานพอประมาณ แนะนำปิดงานเล็กให้ไวเพื่อโมเมนตัม'};
-  return {level:'low', note:'ภาระงานพอดี รักษาจังหวะการทำงานต่อเนื่อง 👍'};
-}
-function pickCoachTip_(me){
-  if(!me) return 'เริ่มต้นวันด้วยงานเล็กสุด 1 งาน เพื่อสร้างแรงส่ง 💪';
-  const cr = Number(me.completionRate||0);
-  if(cr>=80) return 'ยอดเยี่ยม! กันเวลา Deep Work 30 นาที/วัน 🧠';
-  if(me.upcomingTasks>0) return 'เลือกปิด 1 งานที่ใกล้ครบกำหนดที่สุดก่อน ⏳';
-  if(me.pendingTasks>5) return 'จัดลิสต์ “3 งานสำคัญวันนี้” แล้วลงมือทันที ✅';
-  return 'ปิดงาน 1 งานให้เสร็จภายใน 15 นาทีแรกของวัน ✨';
 }
 
 function renderUpcomingTasks(list){
   if (!els.taskCardsContainer) return;
   if (els.headerTotals.myUpcoming){
-    if (state.isLoggedIn){ setText(els.headerTotals.myUpcoming, list.length || 0); }
-    else if (!state.personalStats){ setText(els.headerTotals.myUpcoming, '-'); }
+    if (state.isLoggedIn){
+      setText(els.headerTotals.myUpcoming, list.length || 0);
+    } else if (!state.personalStats){
+      setText(els.headerTotals.myUpcoming, '-');
+    }
   }
   if (!state.isLoggedIn){
     els.taskCardsContainer.innerHTML = `
@@ -743,13 +699,6 @@ function renderUpcomingTasks(list){
   }).join('');
   els.taskCardsContainer.innerHTML = html;
   setText(els.notificationCount, list.length);
-}
-
-function highlight(text, query){
-  if(!query) return escapeHtml(text||'');
-  const q = String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(${q})`,'ig');
-  return escapeHtml(text||'').replace(re,'<mark class="bg-yellow-200">$1</mark>');
 }
 
 function renderTasks(tasks){
@@ -798,10 +747,11 @@ function applyTaskFilters(){
     return haystack.some(text => text.includes(search));
   });
 
-  // Sort tasks from newest to oldest, push "No Due Date" to end
+  // Sort tasks from newest to oldest (reverse chronological)
   filtered.sort((a,b)=>{
     const da = parseTaskDue_(a.dueDate);
     const db = parseTaskDue_(b.dueDate);
+    // Reverse order for newest first
     if (db === da) return String(a.name || '').localeCompare(String(b.name || ''));
     return db - da;
   });
@@ -852,8 +802,8 @@ function renderTaskList(){
       <div class="task-card bg-white rounded-xl p-4 shadow-sm border border-gray-100">
         <div class="flex justify-between items-start">
           <div>
-            <h3 class="text-base font-semibold text-gray-800">${highlight(task.name, state.taskFilters.search)}</h3>
-            <p class="text-sm text-gray-500 mt-1">${highlight(task.assignee || 'ไม่มีผู้รับผิดชอบ', state.taskFilters.search)}</p>
+            <h3 class="text-base font-semibold text-gray-800">${escapeHtml(task.name)}</h3>
+            <p class="text-sm text-gray-500 mt-1">${escapeHtml(task.assignee || 'ไม่มีผู้รับผิดชอบ')}</p>
           </div>
           <span class="text-xs font-medium px-2 py-1 rounded-full ${statusClass}">
             ${escapeHtml(statusLabel)}
@@ -901,17 +851,20 @@ function renderTaskPagination(){
 }
 
 function parseTaskDue_(value){
-  if (!value || value === 'No Due Date') return -Infinity;
+  if (!value || value === 'No Due Date') return 0; // Changed to 0 for reverse sorting
   const iso = `${value}T00:00:00+07:00`;
   const date = new Date(iso);
-  if (isNaN(date)) return -Infinity;
+  if (isNaN(date)) return 0;
   return date.getTime();
 }
 
 function updateAdminUI(){
   if (els.addTaskBtn){
-    if (state.isLoggedIn && state.isAdmin){ els.addTaskBtn.classList.remove('hidden'); }
-    else { els.addTaskBtn.classList.add('hidden'); }
+    if (state.isLoggedIn && state.isAdmin){
+      els.addTaskBtn.classList.remove('hidden');
+    } else {
+      els.addTaskBtn.classList.add('hidden');
+    }
   }
 }
 
@@ -931,8 +884,7 @@ function showNotifications(){
   });
   const remaining = state.notifications.length - lines.length;
   const message = lines.join('\n') + (remaining > 0 ? `\n… และอีก ${remaining} งาน` : '');
-  const go = confirm(`งานที่กำลังจะถึงกำหนด:\n${message}\n\nเปิดรายการงานทั้งหมดตอนนี้หรือไม่?`);
-  if(go){ switchPage('tasksPage'); }
+  alert(`งานที่กำลังจะถึงกำหนด:\n${message}`);
 }
 
 function renderUserStats(stats){
@@ -945,7 +897,12 @@ function renderUserStats(stats){
     `;
     return;
   }
-  const activeStats = stats.filter(row => (row.totalTasks||0) > 0);
+  // Filter only Active users if available
+  const activeStats = stats.filter(row => {
+    // Check if user has tasks (active users will have tasks)
+    return row.totalTasks > 0;
+  });
+  
   if (!activeStats.length){
     els.userStatsContainer.innerHTML = `
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 text-center text-sm text-gray-500">
@@ -968,43 +925,23 @@ function renderUserStats(stats){
           <p class="text-xs text-gray-500">${escapeHtml(row.email || 'ไม่มีอีเมล')}</p>
         </div>
       </div>
-      <div class="flex items-center space-x-3">
-        <div class="hidden sm:flex sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
-          <span>ทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
-          <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
-          <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
-          <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
-        </div>
-        <button class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
-                data-kudos="${escapeAttr(row.email || row.assignee || '')}">
-          ส่งกำลังใจ 💚
-        </button>
+      <div class="flex flex-col sm:flex-row sm:space-x-4 text-xs text-gray-600 text-right sm:text-left">
+        <span>งานทั้งหมด: <strong class="text-blue-600">${row.totalTasks || 0}</strong></span>
+        <span>เสร็จแล้ว: <strong class="text-green-600">${row.completedTasks || 0}</strong></span>
+        <span>รอดำเนินการ: <strong class="text-yellow-600">${row.pendingTasks || 0}</strong></span>
+        <span>ความสำเร็จ: <strong class="${completionClass}">${row.completionRate || 0}%</strong></span>
       </div>
     </div>
   `}).join('');
   els.userStatsContainer.innerHTML = html;
-
-  els.userStatsContainer.querySelectorAll('button[data-kudos]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      if(!state.isLoggedIn){ return toastInfo('เข้าสู่ระบบก่อนส่งกำลังใจ'); }
-      const to = btn.getAttribute('data-kudos');
-      try{
-        const res = await jsonpRequest({
-          action:'send_kudos',
-          to,
-          idToken: state.profile?.idToken || ''
-        });
-        if(!res || res.success===false){ toastInfo('ส่งกำลังใจเรียบร้อย ✨'); }
-        else { toastInfo('ส่งกำลังใจเรียบร้อย ✨'); }
-      }catch{ toastInfo('ส่งกำลังใจเรียบร้อย ✨'); }
-    });
-  });
 }
 
 function renderProfilePage(){
   if (state.isLoggedIn){
     const banner = document.getElementById('loginBanner');
-    if (banner && banner.parentNode){ banner.parentNode.removeChild(banner); }
+    if (banner && banner.parentNode){
+      banner.parentNode.removeChild(banner);
+    }
   }
   if (!els.profilePage) return;
   if (!state.isLoggedIn || !state.profile){
@@ -1088,8 +1025,11 @@ function renderProfilePage(){
   }
   const btnSetApiKey = document.getElementById('btnSetApiKey');
   if (btnSetApiKey){
-    if (!state.isAdmin){ btnSetApiKey.classList.add('hidden'); }
-    else{ btnSetApiKey.classList.remove('hidden'); }
+    if (!state.isAdmin){
+      btnSetApiKey.classList.add('hidden');
+    }else{
+      btnSetApiKey.classList.remove('hidden');
+    }
     btnSetApiKey.addEventListener('click', ()=>{
       const current = state.apiKey ? '*** ตั้งค่าแล้ว ***' : 'ยังไม่ได้ตั้งค่า';
       const input = prompt(`กรอกรหัส API KEY สำหรับแก้ไขสถานะ\nสถานะปัจจุบัน: ${current}`);
@@ -1111,46 +1051,45 @@ function renderProfilePage(){
   if (btnRefreshData){
     btnRefreshData.addEventListener('click', ()=>{
       showLoading(true);
-      loadSecureData().finally(()=> showLoading(false));
+      loadSecureData()
+        .finally(()=> showLoading(false));
     });
   }
   updateAdminUI();
 }
 
-// Optimistic update
-async function handleUpdateStatus(taskId){
+function handleUpdateStatus(taskId){
   if (!state.isLoggedIn){
     toastInfo('ต้องเข้าสู่ระบบก่อน');
     return;
   }
-  const idx = state.tasks.findIndex(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
-  if (idx<0){ toastInfo('ไม่พบงานที่เลือก'); return; }
-  const task = state.tasks[idx];
-  if (task.completed === 'Yes'){ toastInfo('งานนี้ทำเสร็จแล้ว'); return; }
-
+  const task = state.tasks.find(t => String(t.id).toUpperCase() === String(taskId).toUpperCase());
+  if (!task){
+    toastInfo('ไม่พบงานที่เลือก');
+    return;
+  }
+  if (task.completed === 'Yes'){
+    toastInfo('งานนี้ทำเสร็จแล้ว');
+    return;
+  }
   const currentStatus = task?.status || (task?.completed === 'Yes' ? 'เสร็จสมบูรณ์' : 'รอดำเนินการ');
   const confirmDone = confirm(`ยืนยันทำเครื่องหมายว่างาน "${task.name}" เสร็จสมบูรณ์หรือไม่?\nสถานะปัจจุบัน: ${currentStatus}`);
   if (!confirmDone) return;
-
-  const prev = {...task};
-  state.tasks[idx] = {...task, completed:'Yes', status:'เสร็จสมบูรณ์'};
-  applyTaskFilters();
-
-  try{
-    const res = await jsonpRequest({
-      action: 'update_status',
-      taskId,
-      status: 'เสร็จสมบูรณ์',
-      idToken: state.profile?.idToken || ''
-    });
-    if (!res || res.success === false) throw new Error(res?.message || 'update failed');
+  showLoading(true);
+  jsonpRequest({
+    action: 'update_status',
+    taskId,
+    status: 'เสร็จสมบูรณ์',
+    idToken: state.profile?.idToken || ''
+  }).then(res=>{
+    if (!res || res.success === false){
+      throw new Error(res?.message || 'update failed');
+    }
     toastInfo('อัปเดตสถานะเรียบร้อย');
-    await Promise.all([loadSecureData(), loadPublicData()]);
-  }catch(err){
-    state.tasks[idx] = prev;
-    applyTaskFilters();
+    return Promise.all([loadSecureData(), loadPublicData()]);
+  }).catch(err=>{
     handleDataError(err, 'อัปเดตสถานะไม่สำเร็จ');
-  }
+  }).finally(()=> showLoading(false));
 }
 
 function jsonpRequest(params, retryCount = 0){
@@ -1187,12 +1126,18 @@ function jsonpRequest(params, retryCount = 0){
         clearTimeout(timeoutId);
         timeoutId = null;
       }
+      // Delay cleanup to allow late responses
       setTimeout(()=>{
-        if (window[callbackName]){ try{ delete window[callbackName]; }catch{} }
-        if (script.parentNode){ script.parentNode.removeChild(script); }
+        if (window[callbackName]){
+          delete window[callbackName];
+        }
+        if (script.parentNode){
+          script.parentNode.removeChild(script);
+        }
       }, 1000);
     }
     
+    // Set up callback
     window[callbackName] = data=>{
       if (!isResolved){
         isResolved = true;
@@ -1217,6 +1162,8 @@ function jsonpRequest(params, retryCount = 0){
         }
       }
     };
+    
+    // Add script to document
     document.body.appendChild(script);
   });
 }
